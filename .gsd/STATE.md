@@ -3,31 +3,28 @@
 > **Last Updated**: 2026-10-05
 
 ## Current Position
-- **Phase**: 1
-- **Task**: Moving to Plan 1.2
-- **Status**: Paused at 2026-10-05 22:47
+- **Phase**: 3
+- **Task**: Planning complete
+- **Status**: Ready for execution
 
 ## Last Session Summary
-Phase 1 (Real-Time Infrastructure) started.
-- Researched Kotak Neo Python SDK `SFeed` and WebSocket integration patterns.
-- Planned Phase 1 execution (Plan 1.1 Backend, Plan 1.2 Frontend).
-- Executed Plan 1.1: Backend WebSocket Manager & Integration complete (`server.py` and `manager.py`).
+- Phase 2 (Live Trading Engine & State Isolation) was successfully completed, adding a unified `trading.tsx` with Live vs. Paper toggle and routing.
+- Phase 3 (Automated Strategy Execution) has been planned into two discrete plans.
 
 ## In-Progress Work
-- Ready to begin executing Plan 1.2 (Frontend WebSocket Client & Real-Time UI).
+- Ready to execute Phase 3 plans (Engine creation and UI deployment).
 
 ## Blockers
-None. Context limits recommended a session pause between plans.
+None.
 
 ## Context Dump
 ### Decisions Made
-- `SFeed` will subscribe to all instruments currently in the backend's `watchlist` table, updating periodically every 10 seconds (in `sfeed_loop`).
-- Incoming updates will be broadcasted to all frontend websocket clients globally via `manager.py` using `{"type": "QUOTE", "data": {"token": token, "ltp": ltp}}` format.
+- Strategy engine will run in the background as an async task attached to FastAPI's lifespan, hooked into the `server.py`.
+- It will evaluate signals autonomously and trigger `paper.submit` or Kotak orders depending on the mode configured when the strategy is deployed.
 
 ### Files of Interest
-- `.gsd/phases/1/2-PLAN.md`: The next plan to execute.
-- `neo-trading-terminal/backend/app/terminal/server.py`: Contains the new `SFeed` websocket loop that streams Kotak live quotes.
+- `.gsd/phases/3/1-PLAN.md`: Backend Engine Core
+- `.gsd/phases/3/2-PLAN.md`: Frontend UI Deployment 
 
 ## Next Steps
-1. /execute 1 (which will resume onto incomplete Plan 1.2 since 1.1 is done).
-2. Wire up Frontend `PriceChart.tsx` and `TradeTicket.tsx` to Zustand `marketStore`.
+1. /execute 3
