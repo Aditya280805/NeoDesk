@@ -1,6 +1,5 @@
-# Architecture Decisions (ADR)
+# Decisions
 
-> Log of important architectural decisions.
+> Previous milestone decisions archived in `.gsd/milestones/v1.0/DECISIONS.md`
 
-| ID | Date | Decision | Rationale | Status |
-|----|------|----------|-----------|--------|
+---

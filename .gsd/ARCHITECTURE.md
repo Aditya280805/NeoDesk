@@ -98,8 +98,8 @@
 
 - [ ] **Empty Directory Skeletons**: `backend/app/api/`, `models/`, `risk/`, `services/`, `websocket/` and `frontend/src/stores/`, `hooks/`, `services/` exist but are empty. Core code is currently concentrated in `terminal/` module.
 - [ ] **Root Git Hygiene**: Root directory lacks a `.gitignore` to exclude `gsd-temp/`, `.reference/`, or temporary logs.
-- [ ] **Real Trading Capability**: Real-money order execution is deliberately disabled; paper simulator models simplified margin and no partial fills.
-- [ ] **Realtime Streaming**: Streaming WebSocket / tick feed is not yet implemented (uses polling via REST snapshots).
+- [ ] **Real Trading Capability**: Real-money order execution is now implemented and supported via the Kotak API, gated by a strict UI toggle. Paper simulator models simplified margin and no partial fills.
+- [ ] **Realtime Streaming**: Streaming WebSocket integration is fully implemented using `KotakNeoBroker` SFeed and broadcasted to the Next.js UI over FastAPI WebSockets.
 
 ---
 
