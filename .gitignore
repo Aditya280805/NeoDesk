@@ -1,0 +1,27 @@
+# Environments and secrets
+.env
+.env.local
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Build and data artifacts
+node_modules/
+dist/
+out/
+data/*.sqlite3
+data/*.sqlite3-*
+.pytest_cache/
+.test-runs/
+.next/
+
+# Temporary and reference repositories
+gsd-temp/
+.reference/
