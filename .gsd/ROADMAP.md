@@ -1,13 +1,13 @@
 # ROADMAP.md
 
-> **Current Phase**: Phase 2
+> **Current Phase**: Phase 4
 > **Milestone**: v1.0 (Live Streaming & Trading Integration)
 
 ## Must-Haves (from SPEC)
 - [x] WebSocket streaming for market data and order status.
 - [x] Live F&O and Equity trading integration.
 - [x] Live vs. Paper mode toggle.
-- [ ] Automated strategy execution engine.
+- [x] Automated strategy execution engine.
 - [ ] UI/UX refinement.
 
 ## Phases
@@ -23,7 +23,7 @@
 **Requirements**: REQ-02, REQ-03, REQ-04, REQ-07
 
 ### Phase 3: Automated Strategy Execution
-**Status**: ⬜ Not Started
+**Status**: ✅ Completed
 **Objective**: Upgrade the current backtesting framework to support live execution of algorithmic strategies based on real-time signals.
 **Requirements**: REQ-05
 
