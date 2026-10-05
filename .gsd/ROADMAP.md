@@ -1,24 +1,24 @@
 # ROADMAP.md
 
-> **Current Phase**: Not started
+> **Current Phase**: Phase 2
 > **Milestone**: v1.0 (Live Streaming & Trading Integration)
 
 ## Must-Haves (from SPEC)
-- [ ] WebSocket streaming for market data and order status.
-- [ ] Live F&O and Equity trading integration.
-- [ ] Live vs. Paper mode toggle.
+- [x] WebSocket streaming for market data and order status.
+- [x] Live F&O and Equity trading integration.
+- [x] Live vs. Paper mode toggle.
 - [ ] Automated strategy execution engine.
 - [ ] UI/UX refinement.
 
 ## Phases
 
 ### Phase 1: Real-Time Infrastructure (WebSockets)
-**Status**: ⬜ Not Started
+**Status**: ✅ Completed
 **Objective**: Replace REST polling with live WebSocket streaming for quotes, charts, and option chains.
 **Requirements**: REQ-01, REQ-06
 
 ### Phase 2: Live Trading Engine & State Isolation
-**Status**: ⬜ Not Started
+**Status**: ✅ Completed
 **Objective**: Implement real-money order routing to Kotak Neo, and build a rock-solid Live vs. Paper toggle system to ensure safety.
 **Requirements**: REQ-02, REQ-03, REQ-04, REQ-07
 

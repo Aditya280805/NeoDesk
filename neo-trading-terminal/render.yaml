@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: neodesk
+    runtime: docker
+    plan: starter
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    numInstances: 1
+    disk:
+      name: neodesk-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: PAPER_STARTING_BALANCE
+        value: 100000
+      - key: MARKET_DATA_SOURCE
+        value: sample
+      - key: LIVE_TRADING_ENABLED
+        value: false
+      - key: NEO_LOG_FILE_ENABLED
+        value: false
+      - key: NEO_LOG_LEVEL
+        value: NOLOG

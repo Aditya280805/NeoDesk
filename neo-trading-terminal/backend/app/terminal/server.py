@@ -26,6 +26,7 @@ from app.terminal.paper import PaperAccount
 from app.terminal.market import Market
 from app.terminal.analytics import indicators, backtest
 from app.terminal.discovery import Discovery
+from app.terminal.engine import StrategyEngine
 
 
 class Credentials(BaseModel):
@@ -65,6 +66,14 @@ class BacktestRequest(BaseModel):
     slippage_bps: float = Field(default=5,ge=0,le=100,allow_inf_nan=False)
 
 
+class DeployRequest(BaseModel):
+    instrument_id: str
+    fast: int = Field(default=20,ge=2,le=100)
+    slow: int = Field(default=50,ge=3,le=200)
+    initial: float = Field(default=100000,ge=100,allow_inf_nan=False)
+    mode: Literal['paper', 'live'] = 'paper'
+
+
 def create_app(config: Settings):
     if config.environment == 'production' and (not config.app_password or len(config.app_password.get_secret_value())<16):
         raise RuntimeError('Set a private APP_PASSWORD of at least 16 characters before deploying.')
@@ -72,6 +81,7 @@ def create_app(config: Settings):
     market = Market(config,store)
     paper = PaperAccount(store)
     discovery = Discovery(store,market)
+    strategy_engine = StrategyEngine(store, market, paper)
     sessions, attempts = {}, {}
     sync_lock = Lock()
     sync_status = {'running':False,'error':None}
@@ -121,6 +131,7 @@ def create_app(config: Settings):
                                             "ltp": float(message.last_traded_price)
                                         }
                                     })
+                                    await strategy_engine.on_tick(message.instrument_token, float(message.last_traded_price))
                             except asyncio.TimeoutError:
                                 pass
                 except Exception:
@@ -424,6 +435,23 @@ def create_app(config: Settings):
             raise BrokerError('Backtest blocked: historical data is incomplete. Try again when Kotak history is available.')
         return {**backtest(data['candles'],body.initial,body.fast,body.slow,body.fee_bps,body.slippage_bps),
                 'source':data['source'],'instrument':instrument['symbol'],'note':data['note']}
+
+    @app.post('/api/strategies/deploy')
+    def deploy_strategy(body: DeployRequest):
+        sid = strategy_engine.deploy(body.instrument_id, body.fast, body.slow, body.initial, body.mode)
+        return {'id': sid, 'status': 'RUNNING'}
+
+    @app.get('/api/strategies/active')
+    def active_strategies():
+        return strategy_engine.list_active()
+
+    @app.delete('/api/strategies/{sid}')
+    def stop_strategy(sid: str):
+        strategy_engine.stop(sid)
+        return {'ok': True}
+
+    from app.terminal.live import live_router
+    app.include_router(live_router, prefix="/api")
 
     static=PROJECT_ROOT / 'frontend' / 'out'
     if static.exists():

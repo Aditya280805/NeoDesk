@@ -1,0 +1,14 @@
+import { useEffect, useState } from 'react'
+import { api, failure, Instrument, money, Quote } from '@/lib/api'
+import { useTerminal } from './Layout'
+
+type Activity={items:(Instrument&{quote:Quote;index_name?:string})[];featured:Instrument[];universe:string;tracked:number;quoted:number;source:string;updated_at:string;error:string|null;note:string}
+export default function ActivityList({scope,onSelect}:{scope:'stocks'|'indices';onSelect:(i:Instrument)=>void}){
+  const {status}=useTerminal(),[metric,setMetric]=useState('volume'),[data,setData]=useState<Activity|null>(null),[error,setError]=useState('')
+  useEffect(()=>{let active=true,running=false;async function load(){if(running)return;running=true;try{const r=await api<Activity>(`/market/activity?scope=${scope}&metric=${metric}`);if(active){setData(r);setError('')}}catch(e){if(active){setData(null);setError(failure(e))}}finally{running=false}}void load();const timer=setInterval(load,60000);return()=>{active=false;clearInterval(timer)}},[scope,metric,status?.market_data_source,status?.catalogue.updated_at])
+  return <section className="panel activity-panel"><div className="section-heading"><div><p className="eyebrow">DISCOVER</p><h2>{data?.items.length?'Most active in tracked universe':scope==='stocks'?'Stocks to explore':'Index futures to explore'}</h2></div><select aria-label="Activity ranking" value={metric} onChange={e=>setMetric(e.target.value)}><option value="volume">By reported volume</option><option value="turnover">By estimated traded value</option></select></div>
+    {error&&<p className="error">{error}</p>}{data?.error&&<p className="error">{data.error}</p>}
+    <div className="activity-grid">{data?.items.length?data.items.map((i,n)=><button className="activity-card" key={i.id} onClick={()=>onSelect(i)}><span className="rank">{String(n+1).padStart(2,'0')}</span><span><b>{i.index_name||i.symbol}</b><small>{i.exchange.toUpperCase()}{scope==='indices'?` · ${i.expiry}`:''}</small></span><span><strong>{metric==='volume'?(i.quote.volume??0).toLocaleString('en-IN'):money(i.quote.turnover_estimate)}</strong><small className={i.quote.change_pct>=0?'positive':'negative'}>{i.quote.change_pct.toFixed(2)}%</small></span></button>):data?.featured.map(i=><button className="activity-card" key={i.id} onClick={()=>onSelect(i)}><b>{i.symbol}</b><small>{i.exchange.toUpperCase()}</small></button>)}</div>
+    <p className="fine-print">{data?.universe} · {data?.quoted??0}/{data?.tracked??0} with quotes. {data?.items.length?'Refreshes every minute. Estimated value uses volume × VWAP.':status?.market_data_source==='kotak'?'Featured examples are unranked until broker activity is available.':'Featured examples are unranked. Connect Kotak for activity rankings.'} {data?.items.length?`Updated ${new Date(data.updated_at).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})} IST.`:''}</p>
+  </section>
+}
