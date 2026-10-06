@@ -1,4 +1,5 @@
 import '@/styles/globals.css'
+import '@/styles/instrument.css'
 import type { AppProps } from 'next/app'
 import Layout from '@/components/Layout'
 import { useEffect } from 'react'

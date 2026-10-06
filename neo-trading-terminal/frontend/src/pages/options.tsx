@@ -15,8 +15,8 @@ type Chain = {
 }
 
 const OptionRow = memo(function OptionRow({ s, c, p }: { s: string, c?: Leg, p?: Leg }) {
-  const cLtpLive = useLiveQuote(c?.instrument.neoSymbol.split('|')[1] || c?.instrument.neoSymbol)
-  const pLtpLive = useLiveQuote(p?.instrument.neoSymbol.split('|')[1] || p?.instrument.neoSymbol)
+  const cLtpLive = useLiveQuote(c?.instrument.neoSymbol)
+  const pLtpLive = useLiveQuote(p?.instrument.neoSymbol)
   const cLtp = cLtpLive ?? (c ? Number(c.quote.ltp) : null)
   const pLtp = pLtpLive ?? (p ? Number(p.quote.ltp) : null)
 
@@ -29,11 +29,11 @@ const OptionRow = memo(function OptionRow({ s, c, p }: { s: string, c?: Leg, p?:
       <td className={cMoneyness}>{c?.quote.volume?.toLocaleString('en-IN') ?? '—'}</td>
       <td className={`positive ${cMoneyness} ${cLtpLive ? 'live-tick' : ''}`}>{cLtp != null ? money(cLtp) : '—'}</td>
       <td className={cMoneyness}>
-        {c && <Link className="text-link" href={`/trading/?instrument=${encodeURIComponent(c.instrument.neoSymbol)}`}>Trade ↗</Link>}
+        {c && <Link className="text-link" href={`/instrument/?instrument=${encodeURIComponent(c.instrument.neoSymbol)}`}>Trade ↗</Link>}
       </td>
       <td className="strike">{s}</td>
       <td className={pMoneyness}>
-        {p && <Link className="text-link" href={`/trading/?instrument=${encodeURIComponent(p.instrument.neoSymbol)}`}>Trade ↗</Link>}
+        {p && <Link className="text-link" href={`/instrument/?instrument=${encodeURIComponent(p.instrument.neoSymbol)}`}>Trade ↗</Link>}
       </td>
       <td className={`negative ${pMoneyness} ${pLtpLive ? 'live-tick' : ''}`}>{pLtp != null ? money(pLtp) : '—'}</td>
       <td className={pMoneyness}>{p?.quote.volume?.toLocaleString('en-IN') ?? '—'}</td>

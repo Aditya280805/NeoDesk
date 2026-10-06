@@ -130,6 +130,8 @@ class KotakNeoBroker(BrokerInterface):
                         "received_at": datetime.now(UTC).isoformat(),
                         "last_trade_time": row.get("lstup_time"),
                         "volume":volume, "vwap":vwap,
+                        "change":optional_number('change') if change>=0 else -abs(float(row.get('change',0))),
+                        "ohlc":{k:float(v) for k,v in row.get('ohlc',{}).items() if k in ('open','high','low','close') and v is not None and str(v).replace('.','',1).isdigit()},
                         "turnover_estimate":volume*vwap if volume is not None and vwap is not None else None,
                     })
                 if strict and seen != expected:
@@ -139,8 +141,10 @@ class KotakNeoBroker(BrokerInterface):
                 return [dict(row) for row in normalized]
             except BrokerError:
                 raise
-            except Exception:
+            except Exception as exc:
                 self._cache = None
+                if 'connect' in str(exc).lower() or '10013' in str(exc):
+                    raise BrokerError('Kotak quotes unavailable: network connection blocked or unreachable. Restart the server with network access.') from None
                 raise BrokerError("Kotak quotes unavailable. Check token, instruments, connection or broker rate limits.") from None
 
     def get_positions(self) -> list[dict[str, Any]]:

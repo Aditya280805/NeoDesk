@@ -2,19 +2,19 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { api, failure, Instrument, money, Quote } from '@/lib/api'
 import { useTerminal } from './Layout'
-import { useLiveQuote, useMarketStore } from '@/stores/marketStore'
+import { useMarketStore } from '@/stores/marketStore'
 
 type Balance={available:number;source:string;futures_margin_rate:number}
-export default function TradeTicket({instrument,quote,onFilled}:{instrument:Instrument;quote?:Quote;onFilled?:()=>void}){
+export default function TradeTicket({instrument,quote,onFilled,initialSide='BUY'}:{instrument:Instrument;quote?:Quote;onFilled?:()=>void;initialSide?:'BUY'|'SELL'}){
   const {status}=useTerminal()
   const { tradingMode } = useMarketStore()
   const endpoint = tradingMode === 'LIVE' ? '/live' : '/paper'
-  const [side,setSide]=useState('BUY'),[amount,setAmount]=useState(1),[type,setType]=useState('MARKET'),[price,setPrice]=useState('')
+  const [side,setSide]=useState(initialSide),[amount,setAmount]=useState(1),[type,setType]=useState('MARKET'),[price,setPrice]=useState('')
   const [account,setAccount]=useState<Balance|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('')
   const retry=useRef<{key:string;id:string}|null>(null)
   const derivative=['OPTION','FUTURE'].includes(instrument.kind),future=instrument.kind==='FUTURE'
-  const liveLtp = useLiveQuote(instrument.id.split('|')[1] || instrument.id)
-  const ltp = liveLtp ?? quote?.ltp
+  const liveLtp = undefined
+  const ltp = quote?.ltp
   const quantity=amount*(derivative?instrument.lot_size:1)
   const value=quantity*(type==='LIMIT'?Number(price):ltp??0)
   const supported=['EQUITY','ETF','OPTION','FUTURE'].includes(instrument.kind)

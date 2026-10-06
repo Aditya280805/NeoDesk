@@ -2,6 +2,7 @@
 import csv
 import hashlib
 import io
+import json
 import math
 import os
 import time
@@ -15,7 +16,7 @@ from pydantic import SecretStr
 from app.brokers.base_broker import BrokerError
 from app.brokers.kotak_neo.kotak_broker import KotakNeoBroker
 from app.core.config import Instrument
-from app.terminal.catalogue import normalise
+from app.terminal.catalogue import normalise, quote_token
 
 SEGMENTS = ('nse_cm', 'bse_cm', 'nse_fo', 'bse_fo')
 
@@ -66,10 +67,15 @@ class Market:
         self.lock = RLock()
         self.cache = {}
         self.history_cache = {}
+        self.history_lock = RLock()
         self.last_request = 0.0
         self.source = 'kotak' if config.market_data_source == 'kotak' and config.kotak_consumer_key else 'demo'
         self.last_error = None
         self.seed()
+        # Kotak's cash master omits some index references that have F&O contracts.
+        index=normalise({'id':'nse_cm|Nifty Next 50','token':'Nifty Next 50','exchange':'nse_cm','symbol':'NIFTYNXT50','name':'Nifty Next 50','underlying':'NIFTYNXT50','kind':'INDEX','lot_size':1,'tick_size':.05,'expiry':'','option_type':'','strike':0,'isin':''})
+        with self.store.connect() as db:
+            db.execute('INSERT OR IGNORE INTO instruments VALUES (?,?,?,?,?,?,?)',(index['id'],index['symbol'],index['name'],index['exchange'],index['kind'],index['underlying'],json.dumps(index)))
 
     def seed(self):
         if self.store.metadata()['total']:
@@ -176,17 +182,18 @@ class Market:
             cached = self.cache.get(key)
             if cached and time.monotonic() - cached[0] < 3:
                 return cached[1]
-            self.broker.config.kotak_instruments = [Instrument(exchange_segment=i['exchange'], instrument_token=i['token']) for i in instruments]
+            ids_by_token={(i['exchange'],quote_token(i)):i['id'] for i in instruments}
+            self.broker.config.kotak_instruments = [Instrument(exchange_segment=i['exchange'], instrument_token=quote_token(i)) for i in instruments]
             self.broker._cache = None
             try:
                 delay=.25-(time.monotonic()-self.last_request)
                 if delay>0:
                     time.sleep(delay)
                 rows = self.broker.get_quotes(strict=False)
-                rows = [{**q, 'id': f"{q['exchange_segment']}|{q['instrument_token']}"} for q in rows]
-            except Exception:
-                self.last_error = 'Kotak quotes unavailable'
-                raise BrokerError('Kotak quotes unavailable; no substitute prices were used.') from None
+                rows = [{**q, 'id': ids_by_token[(q['exchange_segment'],q['instrument_token'])]} for q in rows]
+            except BrokerError as exc:
+                self.last_error = str(exc)
+                raise
             finally:
                 self.last_request=time.monotonic()
             self.cache[key] = (time.monotonic(), rows)
@@ -200,7 +207,11 @@ class Market:
         return round(100 + int(hashlib.sha256(identifier.encode()).hexdigest()[:6], 16) % 200000 / 100, 2)
 
     def history(self, identifier, interval='D', days=365):
-        self.store.instrument(identifier)
+        with self.history_lock:
+            return self._history(identifier,interval,days)
+
+    def _history(self, identifier, interval='D', days=365):
+        instrument=self.store.instrument(identifier)
         maximum = {'1min':30,'5min':30,'15min':60,'60min':90,'D':180}[interval]
         if days < 1 or days > (540 if interval == 'D' else maximum):
             raise ValueError(f'{interval} supports 1–{540 if interval == "D" else maximum} days in this terminal.')
@@ -226,7 +237,7 @@ class Market:
         while start <= end:
             batch_end = min(end, start + timedelta(days=maximum-1))
             try:
-                raw = self.call('historical_data', neosymbol=identifier, interval=interval,
+                raw = self.call('historical_data', neosymbol=instrument['exchange']+'|'+quote_token(instrument), interval=interval,
                                 from_date=start.isoformat(), to_date=batch_end.isoformat())
                 rows.extend(raw['data']['candles'])
                 if 'partial' in str(raw.get('message','')).lower():

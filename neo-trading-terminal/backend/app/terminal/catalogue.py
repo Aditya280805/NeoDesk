@@ -49,3 +49,12 @@ def contract_open(item):
         return False
     # Stop new simulator trades at the expiry session close; no invented settlement price.
     return datetime.now(IST) < datetime.fromisoformat(expiry + 'T15:30:00').replace(tzinfo=IST)
+INDEX_QUOTE_TOKENS = {
+    'NIFTY':'Nifty 50', 'BANKNIFTY':'Nifty Bank', 'FINNIFTY':'Nifty Fin Service',
+    'MIDCPNIFTY':'NIFTY MID SELECT', 'NIFTYNXT50':'Nifty Next 50',
+    'SENSEX':'SENSEX', 'BANKEX':'BANKEX', 'SENSEX50':'SENSEX50',
+}
+
+def quote_token(item):
+    return INDEX_QUOTE_TOKENS.get(item['symbol'], item['token']) if item['kind']=='INDEX' else item['token']
+
