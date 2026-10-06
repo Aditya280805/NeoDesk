@@ -3,26 +3,26 @@
 > **Last Updated**: 2026-10-06
 
 ## Current Position
-- **Phase**: 3
-- **Task**: Planning complete
-- **Status**: Ready for execution
+- **Milestone**: v3.0 (Automated Strategy Engine & Live Order Execution)
+- **Phase**: Not started
+- **Status**: Milestone planned
 
 ## Last Session Summary
-Phase 2 executed successfully. 1 plan, 1 tasks completed. Created frontend instrument dashboard page at `[id].tsx`.
+Completed Milestone v2.0 (Historical candle data backend, dynamic `/instrument/[id]` dashboard with multi-timeframe charts, and full light/dark theme switch). Milestone v3.0 initialized.
 
 ## In-Progress Work
-- Ready for Phase 3: Global Theme Refactor (Light/Dark Mode). Building proper theming with next-themes and CSS variables.
+- Ready for Phase 1: Strategy Engine Core & Signal Generation.
 
 ## Blockers
 None.
 
 ## Context Dump
 ### Decisions Made
-- Use `next-themes` for handling class-based toggling (`.dark`) and storing preferences cleanly without SSR mismatch.
-- Default to `dark` theme but properly define Light theme variable baselines.
+- Focus Milestone v3.0 on automated strategy execution, signal generation, and safe live Kotak Neo / paper execution with risk guardrails.
 
 ### Files of Interest
-- `.gsd/phases/3/1-PLAN.md`
+- `.gsd/ROADMAP.md`
+- `.gsd/SPEC.md`
 
 ## Next Steps
-1. /execute 3
+1. /plan 1 — Create Phase 1 execution plans
