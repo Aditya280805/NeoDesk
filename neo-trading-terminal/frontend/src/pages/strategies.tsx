@@ -13,6 +13,7 @@ type ActiveStrategy = {
   id: string; instrument_id: string; token: string;
   fast: number; slow: number; initial: number; mode: string;
   cash: number; held: number; status: string;
+  pnl?: number; trades?: number;
 }
 
 export default function Strategies() {
@@ -21,7 +22,7 @@ export default function Strategies() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [activeStrategies, setActiveStrategies] = useState<ActiveStrategy[]>([])
-  const { tradingMode } = useMarketStore()
+  const { tradingMode, signals, riskAlerts } = useMarketStore()
 
   async function fetchActive() {
     try {
@@ -101,6 +102,24 @@ export default function Strategies() {
     }
   }
 
+  async function pauseStrategy(id: string) {
+    try {
+      await api(`/strategies/${id}/pause`, 'POST')
+      await fetchActive()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  async function resumeStrategy(id: string) {
+    try {
+      await api(`/strategies/${id}/resume`, 'POST')
+      await fetchActive()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   return (
     <>
       <div className="page-heading">
@@ -124,6 +143,8 @@ export default function Strategies() {
                   <th>MODE</th>
                   <th>CASH</th>
                   <th>HELD</th>
+                  <th>P&L</th>
+                  <th>TRADES</th>
                   <th>STATUS</th>
                   <th>ACTION</th>
                 </tr>
@@ -136,11 +157,24 @@ export default function Strategies() {
                     <td className={s.mode === 'live' ? 'negative' : 'positive'}>{s.mode.toUpperCase()}</td>
                     <td>{money(s.cash)}</td>
                     <td>{s.held}</td>
+                    <td className={s.pnl && s.pnl >= 0 ? 'positive' : 'negative'}>{s.pnl !== undefined ? money(s.pnl) : '-'}</td>
+                    <td>{s.trades !== undefined ? s.trades : '-'}</td>
                     <td>{s.status}</td>
                     <td>
-                      {s.status === 'RUNNING' && (
-                        <button className="small" onClick={() => stopStrategy(s.id)}>Stop</button>
-                      )}
+                      <div className="button-row" style={{ display: 'flex', gap: '0.5rem' }}>
+                        {s.status === 'RUNNING' && (
+                          <>
+                            <button className="small" onClick={() => pauseStrategy(s.id)}>Pause</button>
+                            <button className="small" onClick={() => stopStrategy(s.id)}>Stop</button>
+                          </>
+                        )}
+                        {s.status === 'PAUSED' && (
+                          <>
+                            <button className="small" onClick={() => resumeStrategy(s.id)}>Resume</button>
+                            <button className="small" onClick={() => stopStrategy(s.id)}>Stop</button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -174,7 +208,29 @@ export default function Strategies() {
           </form>
           {error && <p className="error">{error}</p>}
         </section>
+        
         <section className="panel padded">
+          <h2>Live Feed</h2>
+          <div className="feed-container" style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {riskAlerts.map((alert, i) => (
+              <div key={`risk-${i}`} className="alert-item" style={{ padding: '0.5rem', borderLeft: '4px solid #ff4444', backgroundColor: 'rgba(255, 68, 68, 0.1)' }}>
+                <strong>RISK ALERT:</strong> {JSON.stringify(alert)}
+              </div>
+            ))}
+            {signals.map((signal, i) => (
+              <div key={`sig-${i}`} className="signal-item" style={{ padding: '0.5rem', borderLeft: '4px solid #00C851', backgroundColor: 'rgba(0, 200, 81, 0.1)' }}>
+                <strong>SIGNAL:</strong> {JSON.stringify(signal)}
+              </div>
+            ))}
+            {riskAlerts.length === 0 && signals.length === 0 && (
+              <p className="fine-print">No live signals or alerts yet.</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <div className="two-columns">
+        <section className="panel padded" style={{ gridColumn: 'span 2' }}>
           <h2>TradingView & your algorithms</h2>
           <p>These charts use TradingView’s open-source Lightweight Charts library with our own Kotak data and indicator calculations.</p>
           <p>Pine Script strategies run on tradingview.com. This embedded chart does not include Pine’s runtime or Strategy Tester.</p>
@@ -188,6 +244,7 @@ export default function Strategies() {
           <p className="fine-print">DMA means a moving average of daily closes here. If you mean displaced moving average, that is a separate indicator.</p>
         </section>
       </div>
+
       {result && (
         <>
           <div className="section-heading spaced">
