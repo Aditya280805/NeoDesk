@@ -12,7 +12,7 @@
 ## Phases
 
 ### Phase 1: Strategy Engine Core & Signal Generation
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Build and test the strategy execution engine capable of evaluating algorithmic indicators (moving average crossover, RSI overbought/oversold, custom thresholds) on streaming prices and firing BUY/SELL signals.
 
 ### Phase 2: Broker Order Execution & Safety Safeguards
