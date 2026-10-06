@@ -4,34 +4,30 @@
 
 ## Current Position
 - **Milestone**: v3.0 (Automated Strategy Engine & Live Order Execution)
-- **Phase**: 1 (completed)
-- **Task**: All tasks complete (2 plans executed)
-- **Status**: Verified
+- **Phase**: 2
+- **Task**: Planning complete (2 plans created)
+- **Status**: Ready for execution
 
 ## Last Session Summary
-Phase 1 executed successfully.
-- Implemented modular indicator signal evaluators (SMA, EMA, RSI) and Signal model in `signals.py`.
-- Added `strategies` and `signals` SQLite database tables in `store.py`.
-- Upgraded `StrategyEngine` with reboot recovery, multi-strategy evaluation, WebSocket broadcasting, and REST endpoints.
-- Added comprehensive unit and integration test suites (`test_signals.py`, `test_strategy_engine.py`), with all 53 backend tests passing.
+Created Phase 2 execution plans:
+- Plan 2.1: Risk Guardrails & Safety Controls Engine (`risk.py`, order value caps, price collars, daily loss thresholds, kill switch, unit tests).
+- Plan 2.2: Live Broker Order Routing & Strategy Engine Integration (manual & automated live order risk gating, Kotak Neo routing, risk REST APIs, integration tests).
 
 ## In-Progress Work
-- Ready for Phase 2: Broker Order Execution & Safety Safeguards.
+- Ready to execute Phase 2 plans via `/execute 2`.
 
 ## Blockers
 None.
 
 ## Context Dump
 ### Decisions Made
-- Multi-strategy support (SMA Crossover, EMA Crossover, RSI Overbought/Oversold).
-- Decoupled signal generation (`Signal` model in `signals.py`) from order execution.
-- Persist strategies and signals in SQLite (`strategies` and `signals` tables) so bot state and signal history survive server reboots.
-- Broadcast real-time `SIGNAL` events over WebSockets.
+- Pre-trade risk validation for both manual orders (`/live/orders`) and automated strategy bots (`StrategyEngine._execute_order`).
+- Circuit limit / price collar filters to prevent fat-finger orders or aberrant execution prices.
+- Emergency Kill Switch to immediately halt any automated or manual live order placement with audit logging.
 
 ### Files of Interest
-- `.gsd/phases/1/1-SUMMARY.md`
-- `.gsd/phases/1/2-SUMMARY.md`
-- `.gsd/phases/1/VERIFICATION.md`
+- `.gsd/phases/2/1-PLAN.md`
+- `.gsd/phases/2/2-PLAN.md`
 
 ## Next Steps
-1. /plan 2 — Create Phase 2 execution plans
+1. /execute 2
