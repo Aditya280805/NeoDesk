@@ -2,53 +2,61 @@
 phase: 1
 plan: 1
 wave: 1
+depends_on: []
 ---
 
-# Plan 1.1: Historical Data Backend Support
+# Plan 1.1: Strategy Indicator Evaluator & Signal System
 
 ## Objective
-Implement backend functionality to fetch historical market data (candles) from the Kotak Neo API and expose it through a REST endpoint so the frontend charting components can consume it.
+Establish a modular algorithmic signal generation layer (`signals.py`) supporting multiple technical indicators (SMA Crossover, EMA Crossover, RSI Overbought/Oversold). Ensure signal triggers emit standardized `Signal` events with full mathematical validation and debouncing to prevent high-frequency noise.
 
 ## Context
 - .gsd/SPEC.md
-- backend/app/brokers/base_broker.py
-- backend/app/brokers/kotak_neo/kotak_broker.py
-- backend/app/terminal/market.py
-- backend/app/terminal/server.py
+- backend/app/terminal/analytics.py
+- backend/app/terminal/engine.py
 
 ## Tasks
 
 <task type="auto">
-  <name>Extend Broker Interfaces for Historical Data</name>
-  <files>
-    - backend/app/brokers/base_broker.py
-    - backend/app/brokers/kotak_neo/kotak_broker.py
-    - backend/app/terminal/market.py
-  </files>
+  <name>Implement Technical Signal Evaluators and Signal Models</name>
+  <files>neo-trading-terminal/backend/app/terminal/signals.py</files>
   <action>
-    - Update `BaseBroker` class in `base_broker.py` to include an abstract async method `get_historical_data(self, symbol: str, interval: str, from_date: str, to_date: str) -> dict`.
-    - Implement `get_historical_data` in `KotakBroker` (`kotak_broker.py`) using `self.client.historical_data(neosymbol, interval, from_date, to_date)`. Ensure error handling is robust (catch exceptions and return generic empty series or error structure). Make it async and use `run_in_executor` if the Kotak client is blocking.
-    - Update `MarketManager` in `market.py` to provide a passthrough async method `get_history(symbol, interval, from_date, to_date)` that calls `self.broker.get_historical_data`.
+    Create `neo-trading-terminal/backend/app/terminal/signals.py`:
+    1. Define `SignalAction` ('BUY', 'SELL', 'HOLD') and `Signal` dataclass/Pydantic model containing:
+       - `strategy_id`: str
+       - `instrument_id`: str
+       - `action`: SignalAction
+       - `price`: float
+       - `timestamp`: float
+       - `indicator_type`: str ('SMA_CROSSOVER', 'EMA_CROSSOVER', 'RSI_EXTREME')
+       - `metadata`: dict (e.g., indicator values, fast/slow readings)
+    2. Implement mathematical indicator signal evaluators:
+       - `evaluate_sma_crossover(closes, fast, slow)`: detects golden cross (BUY) and death cross (SELL) across preceding candle closes.
+       - `evaluate_ema_crossover(closes, fast, slow)`: computes exponential moving averages with smoothing factor `2 / (period + 1)` and detects crossovers.
+       - `evaluate_rsi_extreme(closes, period=14, oversold=30, overbought=70)`: triggers BUY when RSI dips below oversold and rebounds, and SELL when RSI exceeds overbought.
+    3. Include debouncing and state tracking in an `IndicatorEvaluator` wrapper to prevent duplicate signals on consecutive ticks at the same price bar.
+    Avoid coupling signal calculation directly to order submission or broker network calls.
   </action>
-  <verify>curl -s "http://127.0.0.1:8000/docs" > /dev/null && echo "Success"</verify>
-  <done>KotakBroker successfully calls the `historical_data` method on the neo API client and returns the parsed JSON dict.</done>
+  <verify>python.exe -c "from app.terminal.signals import Signal, evaluate_sma_crossover, evaluate_ema_crossover, evaluate_rsi_extreme; print('signals module importable')"</verify>
+  <done>Signals module cleanly calculates indicators and emits valid typed Signal instances without errors.</done>
 </task>
 
 <task type="auto">
-  <name>Expose Historical Data REST Endpoint</name>
-  <files>
-    - backend/app/terminal/server.py
-  </files>
+  <name>Create Unit Test Suite for Signal Evaluators</name>
+  <files>neo-trading-terminal/backend/tests/test_signals.py</files>
   <action>
-    - Add a new FastAPI `GET` route to `server.py`: `/api/market/history`.
-    - It should accept query parameters: `symbol` (str), `interval` (str, default "D"), `from_date` (str, YYYY-MM-DD), `to_date` (str, YYYY-MM-DD).
-    - It should call `await market.get_history(...)` and return the result as JSON.
-    - Validate parameters and handle backend errors gracefully (return HTTP 500 or 400 instead of crashing).
+    Create `neo-trading-terminal/backend/tests/test_signals.py`:
+    1. Test SMA Crossover with synthetic upward price series (verify BUY signal) and downward series (verify SELL signal).
+    2. Test EMA Crossover responsiveness compared to SMA.
+    3. Test RSI Overbought/Oversold thresholds with oscillation data.
+    4. Test edge cases: insufficient price history (< slow period), constant/flat prices (zero variance), and missing data handling.
+    5. Test debouncing logic: ensure repeated identical prices within the same bar do not trigger repeated thrashing signals.
   </action>
-  <verify>curl -s "http://127.0.0.1:8000/api/market/history?symbol=nse_cm|2885&interval=D&from_date=2024-01-01&to_date=2024-01-10"</verify>
-  <done>FastAPI serves the endpoint correctly, returning JSON data for valid requests.</done>
+  <verify>& ".\.venv\Scripts\python.exe" -m pytest tests/test_signals.py -v</verify>
+  <done>All tests in test_signals.py pass with 100% assertions covering all indicator evaluators and edge cases.</done>
 </task>
 
 ## Success Criteria
-- [ ] Backend exposes `/api/market/history`.
-- [ ] Returns structured candle data directly from Kotak Neo API.
+- [ ] Technical indicators (SMA, EMA, RSI) evaluate correctly and emit standardized `Signal` objects.
+- [ ] Edge cases (short series, zero movement, debouncing) are guarded.
+- [ ] Full pytest test suite for signals passes cleanly.
