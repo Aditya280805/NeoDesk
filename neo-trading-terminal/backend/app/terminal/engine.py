@@ -255,38 +255,40 @@ class StrategyEngine:
                     qty = int(strat['cash'] / ltp)
                     if qty > 0:
                         cost = qty * ltp
-                        strat['held'] = qty
-                        strat['entry_cost'] = cost
-                        strat['cash'] -= cost
-                        strat['total_trades'] = strat.get('total_trades', 0) + 1
-                        self.store.update_strategy_state(
-                            sid, 
-                            cash=strat['cash'], 
-                            held=strat['held'], 
-                            realized_pnl=strat.get('realized_pnl', 0.0), 
-                            total_trades=strat['total_trades']
-                        )
-                        await self._execute_order(strat, instrument, 'BUY', qty, ltp)
+                        success = await self._execute_order(strat, instrument, 'BUY', qty, ltp)
+                        if success:
+                            strat['held'] = qty
+                            strat['entry_cost'] = cost
+                            strat['cash'] -= cost
+                            strat['total_trades'] = strat.get('total_trades', 0) + 1
+                            self.store.update_strategy_state(
+                                sid, 
+                                cash=strat['cash'], 
+                                held=strat['held'], 
+                                realized_pnl=strat.get('realized_pnl', 0.0), 
+                                total_trades=strat['total_trades']
+                            )
 
                 elif signal.action == 'SELL' and strat['held'] > 0:
                     qty = strat['held']
                     proceeds = qty * ltp
                     entry_cost = strat.get('entry_cost', proceeds)
                     pnl = proceeds - entry_cost
-                    strat['realized_pnl'] = strat.get('realized_pnl', 0.0) + pnl
-                    strat['cash'] += proceeds
-                    strat['held'] = 0
-                    strat['total_trades'] = strat.get('total_trades', 0) + 1
-                    self.store.update_strategy_state(
-                        sid, 
-                        cash=strat['cash'], 
-                        held=strat['held'], 
-                        realized_pnl=strat['realized_pnl'], 
-                        total_trades=strat['total_trades']
-                    )
-                    await self._execute_order(strat, instrument, 'SELL', qty, ltp)
+                    success = await self._execute_order(strat, instrument, 'SELL', qty, ltp)
+                    if success:
+                        strat['realized_pnl'] = strat.get('realized_pnl', 0.0) + pnl
+                        strat['cash'] += proceeds
+                        strat['held'] = 0
+                        strat['total_trades'] = strat.get('total_trades', 0) + 1
+                        self.store.update_strategy_state(
+                            sid, 
+                            cash=strat['cash'], 
+                            held=strat['held'], 
+                            realized_pnl=strat['realized_pnl'], 
+                            total_trades=strat['total_trades']
+                        )
 
-    async def _execute_order(self, strat: dict, instrument: dict, side: str, quantity: int, price: float):
+    async def _execute_order(self, strat: dict, instrument: dict, side: str, quantity: int, price: float) -> bool:
         logger.info(f"Strategy {strat['id']} executing {side} {quantity} {instrument['symbol']} @ {price} in {strat['mode']} mode")
         
         if strat['mode'] == 'paper':
@@ -300,6 +302,7 @@ class StrategyEngine:
                 request_id=str(uuid.uuid4()),
                 quote=quote
             )
+            return True
         elif strat['mode'] == 'live':
             try:
                 if self.risk_manager:
@@ -315,7 +318,8 @@ class StrategyEngine:
                         logger.warning(f"Strategy {strat['id']} order rejected by RiskManager: {risk_e}")
                         from app.websocket.manager import manager
                         asyncio.create_task(manager.broadcast({"type": "RISK_ALERT", "data": {"strategy_id": strat['id'], "message": str(risk_e)}}))
-                        return
+                        self.store.audit('strategy_live_order_rejected', f"Strategy {strat['id']} order rejected: {risk_e}")
+                        return False
                 
                 # Place actual live order
                 exch_seg = instrument.get('exchange', 'nse_cm')
@@ -342,5 +346,9 @@ class StrategyEngine:
                         INSERT INTO orders (id, request_id, instrument_id, side, quantity, order_type, status, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ''', (n_ord_no, req_id, strat['instrument_id'], side, quantity, 'MARKET', 'SUBMITTED'))
+                return True
             except Exception as e:
                 logger.error(f"Failed to place live order for strategy {strat['id']}: {e}")
+                self.store.audit('strategy_live_order_failed', f"Strategy {strat['id']} order failed: {e}")
+                return False
+        return False
