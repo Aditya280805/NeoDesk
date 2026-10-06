@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, FormEvent } from 'react'
 import { useRouter } from 'next/router'
 import InstrumentPicker from '@/components/InstrumentPicker'
 import TradeTicket from '@/components/TradeTicket'
@@ -9,23 +9,94 @@ import { useMarketStore } from '@/stores/marketStore'
 
 type Order={id:string;symbol:string;side:string;quantity:number;status:string;fill_price:number|null;limit_price:number|null}
 type Account={initial:number;cash:number;available:number;reserved:number;futures_margin:number;realized:number;equity:number|null;source:string;valuation_error:string|null;positions:{instrument_id:string;symbol:string;quantity:number;average_price:number;ltp:number|null;pnl:number|null;kind:string}[];orders:Order[]}
+type RiskStatus = { kill_switch_active: boolean; max_order_value: number; max_position_quantity: number }
+
 export default function Trading(){
   const router=useRouter(),{status}=useTerminal()
   const { tradingMode } = useMarketStore()
   const endpoint = tradingMode === 'LIVE' ? '/live' : '/paper'
   const [account,setAccount]=useState<Account|null>(null),[instrument,setInstrument]=useState<Instrument|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState('')
+  const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
+  
   const {quotes,error:quoteError}=useQuotes(instrument?[instrument.id]:[])
   async function refresh(){try{setAccount(await api<Account>(endpoint));setError('')}catch(e){setError(failure(e))}}
+  
   useEffect(()=>{let active=true,running=false;async function load(){if(running)return;running=true;try{const r=await api<Account>(endpoint);if(active)setAccount(r)}catch(e){if(active)setError(failure(e))}finally{running=false}}void load();const timer=setInterval(load,5000);return()=>{active=false;clearInterval(timer)}},[status?.market_data_source, endpoint])
   useEffect(()=>{if(typeof router.query.instrument!=='string')return;let active=true;api<Instrument>(`/instruments/${encodeURIComponent(router.query.instrument)}`).then(i=>{if(active)setInstrument(i)}).catch(e=>{if(active)setError(failure(e))});return()=>{active=false}},[router.query.instrument])
+  
+  useEffect(() => {
+    let active = true
+    async function loadRisk() {
+      try {
+        const r = await api<RiskStatus>('/risk/status')
+        if (active) setRiskStatus(r)
+      } catch (e) {
+        // ignore
+      }
+    }
+    void loadRisk()
+    const timer = setInterval(loadRisk, 5000)
+    return () => { active = false; clearInterval(timer) }
+  }, [])
+
   async function reset(){if(tradingMode === 'LIVE')return;const confirmation=window.prompt('This removes paper orders and positions. Type RESET PAPER ACCOUNT to confirm.');if(!confirmation)return;try{setAccount(await api<Account>('/paper/reset','POST',{confirmation}));setNotice('Paper account reset.');setError('')}catch(e){setError(failure(e))}}
   async function selectPosition(id:string){try{setInstrument(await api<Instrument>(`/instruments/${encodeURIComponent(id)}`))}catch(e){setError(failure(e))}}
+
+  async function updateRiskLimits(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    try {
+      await api('/risk/limits', 'PUT', {
+        max_order_value: Number(f.get('max_order_value')),
+        max_position_quantity: Number(f.get('max_position_quantity'))
+      })
+      setRiskStatus(await api<RiskStatus>('/risk/status'))
+      setError('')
+      setNotice('Risk limits updated.')
+    } catch (e) {
+      setError(failure(e))
+    }
+  }
+
+  async function resetKillSwitch() {
+    try {
+      await api('/risk/reset-kill-switch', 'POST')
+      setRiskStatus(await api<RiskStatus>('/risk/status'))
+      setNotice('Kill switch reset.')
+    } catch (e) {
+      setError(failure(e))
+    }
+  }
+
   return <><div className="page-heading"><div><p className="eyebrow">{tradingMode === 'LIVE' ? 'LIVE PORTFOLIO' : 'YOUR PRACTICE PORTFOLIO'}</p><h1>{tradingMode === 'LIVE' ? 'Live trading' : 'Paper trading'}<span className="accent">.</span></h1><p>{tradingMode === 'LIVE' ? 'Real money execution.' : `${money(account?.initial??100000)} initial capital · stocks, long options and futures.`}</p></div><span className={`badge ${tradingMode === 'LIVE' ? 'amber' : ''}`}>{tradingMode === 'LIVE' ? 'LIVE MARKET EXECUTION' : 'SIMULATED EXECUTION'}</span></div>
     <div className="metrics">{[['Account equity',account?.equity],['Available cash',account?.available],['Orders + futures margin',account?.reserved],['Realized P&L',account?.realized]].map(([title,value])=><div className="metric" key={title as string}><span className="metric-label">{title}</span><strong>{value==null?'—':money(value as number)}</strong></div>)}</div>
     {(error||quoteError||account?.valuation_error)&&<p className="error">{error||quoteError||account?.valuation_error}</p>}{notice&&<p className="success">{notice}</p>}
+    
+    {tradingMode === 'LIVE' && riskStatus && (
+      <section className="panel padded" style={{ marginBottom: '2rem', border: riskStatus.kill_switch_active ? '2px solid #ff4444' : '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2>Risk Guardrails</h2>
+          {riskStatus.kill_switch_active && <span style={{ color: '#ff4444', fontWeight: 'bold' }}>KILL SWITCH ACTIVE</span>}
+        </div>
+        <form onSubmit={updateRiskLimits} style={{ marginTop: '1rem' }}>
+          <div className="form-row">
+            <label>Max Order Value (₹)<input name="max_order_value" type="number" defaultValue={riskStatus.max_order_value} required /></label>
+            <label>Max Position Quantity<input name="max_position_quantity" type="number" defaultValue={riskStatus.max_position_quantity} required /></label>
+          </div>
+          <div className="button-row" style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <button type="submit" className="primary">Update Limits</button>
+            {riskStatus.kill_switch_active && (
+              <button type="button" onClick={resetKillSwitch}>Reset Kill Switch</button>
+            )}
+          </div>
+        </form>
+      </section>
+    )}
+
     <div className="trading-layout"><div><section className="panel"><div className="section-heading padded"><h2>Positions</h2><span className="muted">{account?.source} prices</span></div><div className="table-scroll"><table><thead><tr><th>INSTRUMENT</th><th>QTY</th><th>AVERAGE</th><th>LTP</th><th>P&L</th><th></th></tr></thead><tbody>{account?.positions.map(p=><tr key={p.instrument_id}><td>{p.symbol}<small className="instrument-name">{p.kind==='FUTURE'?(p.quantity<0?'Short future':'Long future'):'Cash / long option'}</small></td><td>{p.quantity}</td><td>{money(p.average_price)}</td><td>{p.ltp==null?'—':money(p.ltp)}</td><td className={(p.pnl??0)>=0?'positive':'negative'}>{p.pnl==null?'—':money(p.pnl)}</td><td><button onClick={()=>selectPosition(p.instrument_id)}>Trade</button></td></tr>)}</tbody></table></div>{!account?.positions.length&&<div className="empty-state">{tradingMode === 'LIVE' ? 'No live positions.' : 'Your first paper trade starts here.'}<small>Choose a stock or index contract to begin.</small></div>}</section>
     <section className="panel spaced"><div className="section-heading padded"><h2>Order book</h2>{tradingMode === 'PAPER' && <button onClick={reset}>Reset account</button>}</div><div className="table-scroll"><table><thead><tr><th>INSTRUMENT</th><th>SIDE / QTY</th><th>PRICE</th><th>STATUS</th><th></th></tr></thead><tbody>{account?.orders.map(o=><tr key={o.id}><td>{o.symbol}<small className="instrument-name">{o.id}</small></td><td><span className={o.side==='BUY'?'positive':'negative'}>{o.side}</span> · {o.quantity}</td><td>{o.fill_price!=null||o.limit_price!=null?money((o.fill_price??o.limit_price??0)/100):'—'}</td><td><span className="tag">{o.status}</span></td><td>{o.status==='OPEN'&&<button onClick={async()=>{try{await api(`${endpoint}/orders/${o.id}`,'DELETE');await refresh()}catch(e){setError(failure(e))}}}>Cancel</button>}</td></tr>)}</tbody></table></div>{!account?.orders.length&&<div className="empty-state">No orders yet.</div>}</section>
     <p className="fine-print">Futures collateral: {money(account?.futures_margin??0)}. The simulator reserves 20% of entry notional. Unrealized gains do not increase available cash. Losses can exceed collateral; daily settlement and forced liquidation are not simulated. Close derivatives before expiry.</p></div>
     <div className="selection-column"><section className="panel padded"><h2>Find an instrument</h2><InstrumentPicker onSelect={setInstrument}/></section>{instrument&&<div className="spaced"><TradeTicket key={`${tradingMode}-${instrument.id}`} instrument={instrument} quote={quotes[instrument.id]} onFilled={refresh}/></div>}</div></div>
   </>
 }
+
