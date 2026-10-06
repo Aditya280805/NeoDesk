@@ -12,6 +12,7 @@
 ## Phases
 
 ### Phase 1: Instrument Details Backend & History API
+**Status**: ✅ Complete
 - Create new FastAPI endpoints in `/api/market/history` for fetching candle data.
 - Verify Kotak Neo history data capabilities and implement caching.
 
