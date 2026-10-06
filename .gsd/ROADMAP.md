@@ -16,11 +16,11 @@
 **Objective**: Build and test the strategy execution engine capable of evaluating algorithmic indicators (moving average crossover, RSI overbought/oversold, custom thresholds) on streaming prices and firing BUY/SELL signals.
 
 ### Phase 2: Broker Order Execution & Safety Safeguards
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Implement real Kotak Neo order execution routing with safety guardrails (max trade loss, order value caps, double-confirmation for live trades, exception fallbacks to paper trading).
 
 ### Phase 3: Strategy Lab UI & Active Management Dashboard
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Build frontend views in `/strategies/` to configure strategy parameters, trigger historical backtests, activate/pause automated bots, and display execution performance and live signal alerts.
 
 ### Phase 4: End-to-End Simulation & Verification
