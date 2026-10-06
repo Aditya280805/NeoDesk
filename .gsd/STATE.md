@@ -3,28 +3,26 @@
 > **Last Updated**: 2026-10-06
 
 ## Current Position
-- **Phase**: 2 (completed)
-- **Task**: All tasks complete
-- **Status**: Verified
+- **Phase**: 3
+- **Task**: Planning complete
+- **Status**: Ready for execution
 
 ## Last Session Summary
 Phase 2 executed successfully. 1 plan, 1 tasks completed. Created frontend instrument dashboard page at `[id].tsx`.
 
 ## In-Progress Work
-- Ready for Phase 3: Global Theme Refactor (Light/Dark Mode).
+- Ready for Phase 3: Global Theme Refactor (Light/Dark Mode). Building proper theming with next-themes and CSS variables.
 
 ## Blockers
 None.
 
 ## Context Dump
 ### Decisions Made
-- `[id].tsx` uses `days` and `interval` parameters mapped to standard UI intervals (1D, 5D, 1Y) for history.
-- Core fundamentals missing from Neo API will be omitted or marked N/A, prioritizing tech indicators from historical data.
+- Use `next-themes` for handling class-based toggling (`.dark`) and storing preferences cleanly without SSR mismatch.
+- Default to `dark` theme but properly define Light theme variable baselines.
 
 ### Files of Interest
-- `.gsd/phases/2/1-SUMMARY.md`
-- `.gsd/phases/2/VERIFICATION.md`
+- `.gsd/phases/3/1-PLAN.md`
 
 ## Next Steps
-1. Proceed to Phase 3
-2. /plan 3
+1. /execute 3
