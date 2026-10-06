@@ -3,10 +3,11 @@ import hashlib
 import secrets
 import time
 import os
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -68,6 +69,9 @@ class BacktestRequest(BaseModel):
 
 class DeployRequest(BaseModel):
     instrument_id: str
+    name: str | None = None
+    strategy_type: Literal['SMA_CROSSOVER', 'EMA_CROSSOVER', 'RSI_EXTREME'] = 'SMA_CROSSOVER'
+    params: dict[str, Any] | None = None
     fast: int = Field(default=20,ge=2,le=100)
     slow: int = Field(default=50,ge=3,le=200)
     initial: float = Field(default=100000,ge=100,allow_inf_nan=False)
@@ -105,37 +109,17 @@ def create_app(config: Settings):
                     pass
 
     async def sfeed_loop():
+        # Forward validated REST snapshots to connected views. Quote requests are
+        # driven by visible pages; this never implies an exchange tick subscription.
         while True:
-            await asyncio.sleep(2)
-            if market.broker.is_authenticated:
-                try:
-                    from neo_api_client.websocket.feed import SFeedScrip, WsToken
-                    async with market.broker.client.create_websocket() as ws:
-                        last_sub = 0
-                        while market.broker.is_authenticated:
-                            if time.time() - last_sub > 10:
-                                with store.connect() as db:
-                                    watched = db.execute("SELECT exchange, instrument_token FROM instruments WHERE id IN (SELECT instrument_id FROM watchlist)").fetchall()
-                                if watched:
-                                    tokens = [WsToken(ex, tok) for ex, tok in watched]
-                                    await ws.subscribe_scrips(tokens)
-                                last_sub = time.time()
-                            
-                            try:
-                                message = await asyncio.wait_for(ws.__anext__(), timeout=2.0)
-                                if isinstance(message, SFeedScrip):
-                                    await manager.broadcast({
-                                        "type": "QUOTE",
-                                        "data": {
-                                            "token": message.instrument_token,
-                                            "ltp": float(message.last_traded_price)
-                                        }
-                                    })
-                                    await strategy_engine.on_tick(message.instrument_token, float(message.last_traded_price))
-                            except asyncio.TimeoutError:
-                                pass
-                except Exception:
-                    pass
+            await asyncio.sleep(5)
+            if not manager.active_connections:
+                continue
+            with market.lock:
+                rows={q['id']:q for stamp, batch in market.cache.values()
+                      if time.monotonic()-stamp<10 for q in batch}
+            for quote in rows.values():
+                await manager.broadcast({'type':'QUOTE','data':quote})
 
     @asynccontextmanager
     async def lifespan(app):
@@ -145,7 +129,7 @@ def create_app(config: Settings):
         task.cancel()
         sfeed_task.cancel()
         try:
-            await task
+            await asyncio.gather(task,sfeed_task,return_exceptions=True)
         except asyncio.CancelledError:
             pass
         market.broker.close()
@@ -330,6 +314,16 @@ def create_app(config: Settings):
     def instrument(identifier: str):
         return store.instrument(identifier)
 
+    @app.get('/api/instrument-detail')
+    def instrument_detail(instrument_id: str):
+        item=store.instrument(instrument_id)
+        variants=[item]
+        with store.connect() as db:
+            if item['kind'] in ('EQUITY','ETF') and item.get('isin'):
+                variants=[json.loads(r[0]) for r in db.execute("SELECT payload FROM instruments WHERE kind=? AND exchange IN ('nse_cm','bse_cm') AND json_extract(payload,'$.isin')=? ORDER BY exchange DESC",(item['kind'],item['isin']))]
+            held=db.execute('SELECT quantity FROM positions WHERE instrument_id=?',(instrument_id,)).fetchone()
+        return {'instrument':item,'variants':variants,'paper_quantity':held[0] if held else 0}
+
     @app.post('/api/watchlist')
     def watch(body: QuoteRequest):
         for identifier in body.ids:
@@ -438,12 +432,35 @@ def create_app(config: Settings):
 
     @app.post('/api/strategies/deploy')
     def deploy_strategy(body: DeployRequest):
-        sid = strategy_engine.deploy(body.instrument_id, body.fast, body.slow, body.initial, body.mode)
+        params = body.params or {'fast': body.fast, 'slow': body.slow}
+        sid = strategy_engine.deploy(
+            instrument_id=body.instrument_id,
+            strategy_type=body.strategy_type,
+            params=params,
+            initial=body.initial,
+            mode=body.mode,
+            name=body.name
+        )
         return {'id': sid, 'status': 'RUNNING'}
 
     @app.get('/api/strategies/active')
     def active_strategies():
         return strategy_engine.list_active()
+
+    @app.get('/api/strategies/{sid}')
+    def get_strategy(sid: str):
+        strat = strategy_engine.get_strategy(sid)
+        if not strat:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        return strat
+
+    @app.get('/api/strategies/{sid}/signals')
+    def strategy_signals(sid: str, limit: int = 50):
+        return store.get_signals(strategy_id=sid, limit=limit)
+
+    @app.get('/api/signals/recent')
+    def recent_signals(limit: int = 50):
+        return store.get_signals(limit=limit)
 
     @app.delete('/api/strategies/{sid}')
     def stop_strategy(sid: str):
