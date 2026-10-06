@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID
 
 from app.brokers.base_broker import BrokerError
+from app.terminal.risk import RiskViolationError
 from neo_api_client.exceptions import (
     AuthenticationError,
     ValidationError,
@@ -112,6 +113,26 @@ def place_order(body: LiveOrder, request: Request):
     order_type = 'L' if body.order_type == 'LIMIT' else 'MKT'
     price = str(body.limit_price) if body.limit_price else "0"
     
+    # Fetch quote for LTP
+    rows = market.quotes([body.instrument_id])
+    if not rows:
+        raise HTTPException(400, 'No usable price is available for this instrument.')
+    ltp = rows[0].get('ltp', 0.0)
+
+    # Pre-trade Risk Check
+    risk_manager = request.app.state.risk_manager
+    try:
+        risk_manager.validate_order(
+            instrument=neo_symbol,
+            side=body.side,
+            quantity=body.quantity,
+            price=body.limit_price,
+            ltp=float(ltp)
+        )
+    except RiskViolationError as e:
+        store.audit('live_order_rejected', f"Risk violation: {e.message}")
+        raise HTTPException(400, f"Risk Guardrail Violation: {e.message}")
+
     try:
         res = market.broker.client.place_order(
             exchange_segment=exch_seg,
@@ -123,6 +144,7 @@ def place_order(body: LiveOrder, request: Request):
             trading_symbol=neo_symbol,
             transaction_type=tx_type
         )
+        store.audit('live_order_submitted', f"Live order submitted for {body.quantity} {neo_symbol}")
         return {"ok": True, "data": res}
     except ValidationError as e:
         raise HTTPException(422, f"Invalid order parameters: {e}")

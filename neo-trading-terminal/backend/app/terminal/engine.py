@@ -8,10 +8,11 @@ from app.terminal.signals import Signal, IndicatorEvaluator
 logger = logging.getLogger(__name__)
 
 class StrategyEngine:
-    def __init__(self, store, market, paper):
+    def __init__(self, store, market, paper, risk_manager=None):
         self.store = store
         self.market = market
         self.paper = paper
+        self.risk_manager = risk_manager
         self.strategies: Dict[str, Dict[str, Any]] = {}
         self.evaluators: Dict[str, IndicatorEvaluator] = {}
         self._load_persisted_strategies()
@@ -275,7 +276,45 @@ class StrategyEngine:
             )
         elif strat['mode'] == 'live':
             try:
-                # Live order routing staged for Phase 2
-                logger.info(f"Staging live order execution for {instrument['symbol']} ({side} {quantity})")
+                if self.risk_manager:
+                    try:
+                        self.risk_manager.validate_order(
+                            instrument=instrument['symbol'],
+                            side=side,
+                            quantity=quantity,
+                            price=price,
+                            ltp=price
+                        )
+                    except Exception as risk_e:
+                        logger.warning(f"Strategy {strat['id']} order rejected by RiskManager: {risk_e}")
+                        from app.websocket.manager import manager
+                        asyncio.create_task(manager.broadcast({"type": "RISK_ALERT", "data": {"strategy_id": strat['id'], "message": str(risk_e)}}))
+                        return
+                
+                # Place actual live order
+                exch_seg = instrument.get('exchange', 'nse_cm')
+                neo_symbol = instrument.get('neo_symbol', instrument.get('symbol'))
+                tx_type = 'B' if side == 'BUY' else 'S'
+                
+                res = self.market.broker.client.place_order(
+                    exchange_segment=exch_seg,
+                    product='MIS',
+                    price="0", # Market order for now
+                    order_type='MKT',
+                    quantity=str(quantity),
+                    validity="DAY",
+                    trading_symbol=neo_symbol,
+                    transaction_type=tx_type
+                )
+                logger.info(f"Live order placed for {strat['id']}: {res}")
+                
+                # We need to record this in the orders table
+                n_ord_no = res.get('nOrdNo', str(uuid.uuid4())) if isinstance(res, dict) else str(uuid.uuid4())
+                req_id = str(uuid.uuid4())
+                with self.store.connect() as db:
+                    db.execute('''
+                        INSERT INTO orders (id, request_id, instrument_id, side, quantity, order_type, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (n_ord_no, req_id, strat['instrument_id'], side, quantity, 'MARKET', 'SUBMITTED'))
             except Exception as e:
                 logger.error(f"Failed to place live order for strategy {strat['id']}: {e}")

@@ -28,7 +28,7 @@ from app.terminal.market import Market
 from app.terminal.analytics import indicators, backtest
 from app.terminal.discovery import Discovery
 from app.terminal.engine import StrategyEngine
-
+from app.terminal.risk import RiskManager, RiskLimits
 
 class Credentials(BaseModel):
     consumer_key: SecretStr
@@ -85,7 +85,8 @@ def create_app(config: Settings):
     market = Market(config,store)
     paper = PaperAccount(store)
     discovery = Discovery(store,market)
-    strategy_engine = StrategyEngine(store, market, paper)
+    risk_manager = RiskManager()
+    strategy_engine = StrategyEngine(store, market, paper, risk_manager=risk_manager)
     sessions, attempts = {}, {}
     sync_lock = Lock()
     sync_status = {'running':False,'error':None}
@@ -135,7 +136,7 @@ def create_app(config: Settings):
         market.broker.close()
 
     app=FastAPI(title='NeoDesk',version='0.3.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
-    app.state.store,app.state.market,app.state.paper=store,market,paper
+    app.state.store,app.state.market,app.state.paper,app.state.risk_manager=store,market,paper,risk_manager
     app.add_middleware(CORSMiddleware,allow_origins=[config.frontend_url],allow_credentials=True,
                        allow_methods=['GET','POST','DELETE'],allow_headers=['Content-Type','X-NeoDesk'])
 
@@ -466,6 +467,31 @@ def create_app(config: Settings):
     def stop_strategy(sid: str):
         strategy_engine.stop(sid)
         return {'ok': True}
+
+    class KillSwitchRequest(BaseModel):
+        reason: str
+
+    @app.get('/api/risk/status')
+    def get_risk_status():
+        return risk_manager.get_status()
+
+    @app.post('/api/risk/kill-switch')
+    def trigger_kill_switch(body: KillSwitchRequest):
+        risk_manager.trigger_kill_switch(body.reason)
+        store.audit('risk_kill_switch', f"Kill switch triggered: {body.reason}")
+        return risk_manager.get_status()
+
+    @app.post('/api/risk/reset-kill-switch')
+    def reset_kill_switch():
+        risk_manager.reset_kill_switch()
+        store.audit('risk_kill_switch', "Kill switch reset")
+        return risk_manager.get_status()
+
+    @app.put('/api/risk/limits')
+    def update_risk_limits(limits: RiskLimits):
+        risk_manager.limits = limits
+        store.audit('risk_limits_updated', "Risk limits updated")
+        return risk_manager.get_status()
 
     from app.terminal.live import live_router
     app.include_router(live_router, prefix="/api")
