@@ -17,6 +17,7 @@
 - Verify Kotak Neo history data capabilities and implement caching.
 
 ### Phase 2: Instrument Details Frontend Page
+**Status**: ✅ Complete
 - Create Next.js dynamic route `/instrument/[symbol]`.
 - Build the layout for Fundamentals, Technicals, and Chart placeholder.
 - Integrate interactive charting library (e.g., `lightweight-charts`).
