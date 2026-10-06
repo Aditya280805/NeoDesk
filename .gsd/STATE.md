@@ -4,17 +4,17 @@
 
 ## Current Position
 - **Milestone**: v3.0 (Automated Strategy Engine & Live Order Execution)
-- **Phase**: 2
+- **Phase**: 3
 - **Task**: Planning complete (2 plans created)
 - **Status**: Ready for execution
 
 ## Last Session Summary
-Created Phase 2 execution plans:
-- Plan 2.1: Risk Guardrails & Safety Controls Engine (`risk.py`, order value caps, price collars, daily loss thresholds, kill switch, unit tests).
-- Plan 2.2: Live Broker Order Routing & Strategy Engine Integration (manual & automated live order risk gating, Kotak Neo routing, risk REST APIs, integration tests).
+Created Phase 3 execution plans:
+- Plan 3.1: Strategy Pause/Resume & WebSocket Streams (backend and frontend stores).
+- Plan 3.2: Strategy Lab UI & Risk Dashboard (pause/resume controls, live feed, global kill switch).
 
 ## In-Progress Work
-- Ready to execute Phase 2 plans via `/execute 2`.
+- Ready to execute Phase 3 plans via `/execute 3`.
 
 ## Blockers
 None.
