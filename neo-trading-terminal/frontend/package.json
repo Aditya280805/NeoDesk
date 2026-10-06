@@ -9,23 +9,24 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "autoprefixer": "^10.4.17",
+    "axios": "^1.6.7",
+    "lightweight-charts": "5.2.1",
+    "lucide-react": "^1.49.0",
+    "next": "^16.3.8",
+    "next-themes": "^0.4.6",
+    "postcss": "^8.4.35",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "next": "^16.3.8",
-    "lucide-react": "^1.49.0",
-    "lightweight-charts": "5.2.1",
-    "zustand": "^4.5.0",
-    "axios": "^1.6.7",
     "tailwindcss": "^3.4.1",
-    "postcss": "^8.4.35",
-    "autoprefixer": "^10.4.17"
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.39.1",
-    "eslint-config-next": "^16.3.8"
+    "eslint-config-next": "^16.3.8",
+    "typescript": "^5.9.3"
   }
 }
