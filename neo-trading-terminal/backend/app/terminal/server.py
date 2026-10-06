@@ -468,6 +468,16 @@ def create_app(config: Settings):
         strategy_engine.stop(sid)
         return {'ok': True}
 
+    @app.post('/api/strategies/{sid}/pause')
+    def pause_strategy(sid: str):
+        strategy_engine.pause(sid)
+        return {'ok': True}
+
+    @app.post('/api/strategies/{sid}/resume')
+    def resume_strategy(sid: str):
+        strategy_engine.resume(sid)
+        return {'ok': True}
+
     class KillSwitchRequest(BaseModel):
         reason: str
 

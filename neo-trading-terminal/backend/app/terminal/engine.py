@@ -159,6 +159,32 @@ class StrategyEngine:
                 status='STOPPED'
             )
 
+    def pause(self, sid: str):
+        if sid in self.strategies:
+            self.strategies[sid]['status'] = 'PAUSED'
+            strat = self.strategies[sid]
+            self.store.update_strategy_state(
+                sid=sid,
+                cash=strat['cash'],
+                held=strat['held'],
+                realized_pnl=strat.get('realized_pnl', 0.0),
+                total_trades=strat.get('total_trades', 0),
+                status='PAUSED'
+            )
+
+    def resume(self, sid: str):
+        if sid in self.strategies:
+            self.strategies[sid]['status'] = 'RUNNING'
+            strat = self.strategies[sid]
+            self.store.update_strategy_state(
+                sid=sid,
+                cash=strat['cash'],
+                held=strat['held'],
+                realized_pnl=strat.get('realized_pnl', 0.0),
+                total_trades=strat.get('total_trades', 0),
+                status='RUNNING'
+            )
+
     def remove(self, sid: str):
         if sid in self.strategies:
             self.stop(sid)
