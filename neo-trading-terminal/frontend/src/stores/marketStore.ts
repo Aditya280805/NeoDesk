@@ -12,6 +12,10 @@ interface MarketState {
     setConnected: (status: boolean) => void;
     tradingMode: 'PAPER' | 'LIVE';
     setTradingMode: (mode: 'PAPER' | 'LIVE') => void;
+    signals: any[];
+    addSignal: (signal: any) => void;
+    riskAlerts: any[];
+    addRiskAlert: (alert: any) => void;
 }
 
 export const useMarketStore = create<MarketState>((set) => ({
@@ -26,6 +30,10 @@ export const useMarketStore = create<MarketState>((set) => ({
     setConnected: (status) => set(state=>({ connected: status,quotes:status?state.quotes:{} })),
     tradingMode: 'PAPER',
     setTradingMode: (mode) => set({ tradingMode: mode }),
+    signals: [],
+    addSignal: (signal) => set(state => ({ signals: [signal, ...state.signals].slice(0, 50) })),
+    riskAlerts: [],
+    addRiskAlert: (alert) => set(state => ({ riskAlerts: [alert, ...state.riskAlerts].slice(0, 50) })),
 }));
 
 export const useLiveQuote = (instrumentId: string | undefined): number | undefined => {

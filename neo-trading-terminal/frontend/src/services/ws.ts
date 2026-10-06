@@ -44,6 +44,10 @@ class WebSocketService {
                 if (message.type === 'QUOTE' && message.data) {
                     if(message.data.id && Number.isFinite(message.data.ltp) && message.data.ltp>0 && message.data.received_at)
                         useMarketStore.getState().setQuote(message.data.id, message.data.ltp, message.data.received_at);
+                } else if (message.type === 'SIGNAL' && message.data) {
+                    useMarketStore.getState().addSignal(message.data);
+                } else if (message.type === 'RISK_ALERT' && message.data) {
+                    useMarketStore.getState().addRiskAlert(message.data);
                 }
             } catch (err) {
                 console.error("WebSocket message parsing error:", err);
