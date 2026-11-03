@@ -111,14 +111,6 @@ export default function Strategies() {
     }
   }
 
-  async function resumeStrategy(id: string) {
-    try {
-      await api(`/strategies/${id}/resume`, 'POST')
-      await fetchActive()
-    } catch (e) {
-      console.error(e)
-    }
-  }
 
   return (
     <>
@@ -134,6 +126,7 @@ export default function Strategies() {
       {activeStrategies.length > 0 && (
         <section className="panel padded" style={{marginBottom: '2rem'}}>
           <h2>Active Deployments</h2>
+          <p className="fine-print">Automatic execution is currently unavailable. Saved paper strategies stay paused; historical backtests are available.</p>
           <div className="table-scroll">
             <table>
               <thead>
@@ -170,7 +163,7 @@ export default function Strategies() {
                         )}
                         {s.status === 'PAUSED' && (
                           <>
-                            <button className="small" onClick={() => resumeStrategy(s.id)}>Resume</button>
+                            <button className="small" disabled title="Automatic execution awaits a connected strategy market feed">Resume unavailable</button>
                             <button className="small" onClick={() => stopStrategy(s.id)}>Stop</button>
                           </>
                         )}
@@ -201,8 +194,8 @@ export default function Strategies() {
             </div>
             <div className="button-row">
               <button type="submit" disabled={!instrument || busy}>{busy ? 'Running…' : 'Run backtest →'}</button>
-              <button type="button" className={tradingMode === 'LIVE' ? 'danger' : 'primary'} onClick={deploy} disabled={!instrument || busy}>
-                Deploy to {tradingMode}
+              <button type="button" className="primary" onClick={deploy} disabled={!instrument || busy || tradingMode==='LIVE'} title={tradingMode==='LIVE'?'Automated live execution is unavailable. Use a reviewed manual order.':undefined}>
+                {tradingMode==='LIVE'?'Live algorithms unavailable':'Save paper strategy'}
               </button>
             </div>
           </form>

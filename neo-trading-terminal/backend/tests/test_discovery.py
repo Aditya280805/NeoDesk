@@ -93,7 +93,7 @@ def test_activity_ranking_is_scoped_and_demo_unranked(app,monkeypatch):
     d=Discovery(app.state.store,app.state.market)
     assert d.activity('stocks','volume')['items']==[]
     app.state.market.source='kotak'
-    monkeypatch.setattr(app.state.market,'quotes',lambda ids:[{'id':i,'volume':n+1,'turnover_estimate':100-n,'source':'kotak'} for n,i in enumerate(ids)])
+    monkeypatch.setattr(app.state.market,'quotes',lambda ids,**kwargs:[{'id':i,'volume':n+1,'turnover_estimate':100-n,'source':'kotak'} for n,i in enumerate(ids)])
     result=d.activity('stocks','volume')
     assert result['items'][0]['quote']['volume']==max(i['quote']['volume'] for i in result['items'])
     assert result['tracked']<50 and 'Selected NSE' in result['universe']

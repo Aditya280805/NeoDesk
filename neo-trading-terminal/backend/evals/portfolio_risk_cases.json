@@ -1,0 +1,5 @@
+[
+  {"name":"equality","values":["60","40"],"limit":"60","outcome":"pass","left":"6000","right":"6000"},
+  {"name":"below","values":["60","40"],"limit":"59.99","outcome":"breach","left":"6000","right":"5999"},
+  {"name":"repeating_above","values":["2","1"],"limit":"66.66666666","outcome":"breach","left":"200","right":"199.99999998"}
+]

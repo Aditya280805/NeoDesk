@@ -11,9 +11,10 @@ from app.terminal.server import create_app
 @pytest.fixture
 def test_setup(tmp_path):
     config = Settings(
+        _env_file=None,
         data_dir=tmp_path,
         app_password=None,
-        environment='development',
+        environment='test',
         frontend_url='http://localhost:3000'
     )
     store = Store(tmp_path / 'test.sqlite3', balance=500000)

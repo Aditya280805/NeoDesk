@@ -1,6 +1,8 @@
 from typing import Optional, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from threading import RLock
 import datetime
+import json
 
 class RiskViolationError(Exception):
     def __init__(self, message: str, code: str):
@@ -9,18 +11,44 @@ class RiskViolationError(Exception):
         self.message = message
 
 class RiskLimits(BaseModel):
-    max_order_value: float = 500000.0
-    max_daily_loss: float = 25000.0
-    max_price_deviation_pct: float = 10.0
-    max_quantity_per_order: int = 10000
+    max_order_value: float = Field(default=500000.0,gt=0,allow_inf_nan=False)
+    max_daily_loss: float = Field(default=25000.0,gt=0,allow_inf_nan=False)
+    max_price_deviation_pct: float = Field(default=10.0,gt=0,le=100,allow_inf_nan=False)
+    max_quantity_per_order: int = Field(default=10000,gt=0,le=10000)
 
 class RiskManager:
-    def __init__(self, limits: Optional[RiskLimits] = None):
+    def __init__(self, limits: Optional[RiskLimits] = None, store=None, user_id: int=1):
         self.limits = limits or RiskLimits()
         self.kill_switch_active = False
         self.kill_switch_reason: Optional[str] = None
         self.daily_realized_pnl = 0.0
         self.date = datetime.date.today()
+        self._users = {}
+        self._users_lock = RLock()
+        self._store,self._user_id=store,user_id
+        if store:
+            with store.connect() as db:
+                saved=db.execute('SELECT value FROM metadata WHERE key=?',(f'risk:{user_id}',)).fetchone()
+            if saved:
+                state=json.loads(saved[0])
+                self.limits=RiskLimits(**state['limits'])
+                self.kill_switch_active=state['kill_switch_active']
+                self.kill_switch_reason=state['kill_switch_reason']
+
+    def save(self):
+        if self._store:
+            state={'limits':self.limits.model_dump(),'kill_switch_active':self.kill_switch_active,
+                   'kill_switch_reason':self.kill_switch_reason}
+            with self._store.connect() as db:
+                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(f'risk:{self._user_id}',json.dumps(state)))
+
+    def for_user(self, user_id: int):
+        if user_id == 1:
+            return self
+        with self._users_lock:
+            if user_id not in self._users:
+                self._users[user_id] = RiskManager(store=self._store,user_id=user_id)
+            return self._users[user_id]
         
     def _check_date(self):
         today = datetime.date.today()
@@ -60,10 +88,12 @@ class RiskManager:
     def trigger_kill_switch(self, reason: str):
         self.kill_switch_active = True
         self.kill_switch_reason = reason
+        self.save()
         
     def reset_kill_switch(self):
         self.kill_switch_active = False
         self.kill_switch_reason = None
+        self.save()
         
     def record_trade_pnl(self, realized_pnl: float):
         self._check_date()

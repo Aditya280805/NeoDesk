@@ -16,7 +16,7 @@ export function useQuotes(ids:string[]):{quotes:Record<string,Quote>;error:strin
       running=true
       try{
         const rows=key?await api<Quote[]>('/market/quotes','POST',{ids:key.split(',')}):[]
-        if(active)setState({key:stateKey,quotes:Object.fromEntries(rows.map(q=>[q.id,q])),error:''})
+        if(active)setState({key:stateKey,quotes:Object.fromEntries(rows.map(q=>[q.id,q])),error:key&&!rows.length?'No quote was returned for this instrument. Check the broker connection or try again shortly.':''})
       }catch(e){if(active)setState({key:stateKey,quotes:{},error:failure(e)})}
       finally{running=false}
     }

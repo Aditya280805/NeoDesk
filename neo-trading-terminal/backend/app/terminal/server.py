@@ -1,3 +1,10 @@
+"""
+Main FastAPI server module for NeoDesk Trading Terminal.
+
+Wires together the Store, Market, PaperAccount, and StrategyEngine into a 
+unified API. Manages background loops for quotes and order matching, handles 
+REST endpoints, and serves the frontend application.
+"""
 import asyncio
 import hashlib
 import secrets
@@ -5,10 +12,7 @@ import time
 import os
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 from threading import Lock
-from typing import Any, Literal
-from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -23,12 +27,14 @@ from app.websocket.manager import manager
 from app.brokers.base_broker import BrokerError
 from app.core.config import PROJECT_ROOT, Settings
 from app.terminal.store import Store
+from app.terminal.portfolio_risk_store import PortfolioRiskStore
 from app.terminal.paper import PaperAccount
 from app.terminal.market import Market
-from app.terminal.analytics import indicators, backtest
 from app.terminal.discovery import Discovery
 from app.terminal.engine import StrategyEngine
-from app.terminal.risk import RiskManager, RiskLimits
+from app.terminal.risk import RiskManager
+from app.auth.service import decode_token
+from app.auth.router import auth_router
 
 class Credentials(BaseModel):
     consumer_key: SecretStr
@@ -45,69 +51,48 @@ class Password(BaseModel):
     password: SecretStr
 
 
-class QuoteRequest(BaseModel):
-    ids: list[str] = Field(max_length=50)
-
-
-class PaperOrder(BaseModel):
-    instrument_id: str = Field(max_length=100)
-    side: Literal['BUY','SELL']
-    quantity: int = Field(strict=True,gt=0,le=10000)
-    order_type: Literal['MARKET','LIMIT'] = 'MARKET'
-    limit_price: float | None = Field(default=None,gt=0,allow_inf_nan=False)
-    request_id: UUID
-
-
-class BacktestRequest(BaseModel):
-    instrument_id: str
-    fast: int = Field(default=20,ge=2,le=100)
-    slow: int = Field(default=50,ge=3,le=200)
-    initial: float = Field(default=100000,ge=100,le=10000000,allow_inf_nan=False)
-    fee_bps: float = Field(default=5,ge=0,le=100,allow_inf_nan=False)
-    slippage_bps: float = Field(default=5,ge=0,le=100,allow_inf_nan=False)
-
-
-class DeployRequest(BaseModel):
-    instrument_id: str
-    name: str | None = None
-    strategy_type: Literal['SMA_CROSSOVER', 'EMA_CROSSOVER', 'RSI_EXTREME'] = 'SMA_CROSSOVER'
-    params: dict[str, Any] | None = None
-    fast: int = Field(default=20,ge=2,le=100)
-    slow: int = Field(default=50,ge=3,le=200)
-    initial: float = Field(default=100000,ge=100,allow_inf_nan=False)
-    mode: Literal['paper', 'live'] = 'paper'
-
-
 def create_app(config: Settings):
     if config.environment == 'production' and (not config.app_password or len(config.app_password.get_secret_value())<16):
         raise RuntimeError('Set a private APP_PASSWORD of at least 16 characters before deploying.')
     store = Store(config.data_dir / 'terminal.sqlite3', config.paper_starting_balance)
+    portfolio_risk_store = PortfolioRiskStore(store)
     market = Market(config,store)
     paper = PaperAccount(store)
     discovery = Discovery(store,market)
-    risk_manager = RiskManager()
+    risk_manager = RiskManager(store=store)
+    # No strategy feed is attached by this server. Preserve saved strategies
+    # without falsely reporting that they are evaluating or executing orders.
+    for strategy in store.list_strategies(status='RUNNING'):
+        store.update_strategy_state(strategy['id'],strategy['cash'],strategy['held'],status='PAUSED')
     strategy_engine = StrategyEngine(store, market, paper, risk_manager=risk_manager)
     sessions, attempts = {}, {}
     sync_lock = Lock()
+    lifespan_lock = Lock()
     sync_status = {'running':False,'error':None}
 
-    def quote_map(ids):
+    def quote_map(ids,user_id=1):
         result={}
         for start in range(0,len(ids),50):
-            result.update({q['id']:q for q in market.quotes(ids[start:start+50])})
+            result.update({q['id']:q for q in market.quotes(ids[start:start+50],user_id=user_id)})
         return result
 
     async def match_loop():
         while True:
             await asyncio.sleep(5)
             with store.connect() as db:
-                ids=[r[0] for r in db.execute("SELECT DISTINCT instrument_id FROM orders WHERE status='OPEN'")]
-            if ids:
+                pending=[tuple(r) for r in db.execute("SELECT DISTINCT user_id,instrument_id FROM orders WHERE status='OPEN'")]
+            for uid in {r[0] for r in pending}:
+                ids=[r[1] for r in pending if r[0]==uid]
                 try:
-                    quotes=await run_in_threadpool(quote_map,ids)
-                    await run_in_threadpool(paper.match,quotes)
+                    quotes=await run_in_threadpool(quote_map,ids,uid)
+                    await run_in_threadpool(paper.match,quotes,uid)
                 except (BrokerError,ValueError):
                     pass
+
+    def recent_snapshots():
+        with market.lock:
+            return {(key[0],q['id']):q for key,(stamp, batch) in market.cache.items()
+                    if time.monotonic()-stamp<10 for q in batch}
 
     async def sfeed_loop():
         # Forward validated REST snapshots to connected views. Quote requests are
@@ -116,64 +101,152 @@ def create_app(config: Settings):
             await asyncio.sleep(5)
             if not manager.active_connections:
                 continue
-            with market.lock:
-                rows={q['id']:q for stamp, batch in market.cache.values()
-                      if time.monotonic()-stamp<10 for q in batch}
-            for quote in rows.values():
-                await manager.broadcast({'type':'QUOTE','data':quote})
+            rows=await run_in_threadpool(recent_snapshots)
+            for (uid,_),quote in rows.items():
+                await manager.broadcast({'type':'QUOTE','data':quote,'user_id':uid})
+
+    @asynccontextmanager
+    async def owned_lifespan(app):
+        from contextlib import AsyncExitStack
+        from app.terminal.agent_logging import setup_agno_logging
+        setup_agno_logging()
+        async with AsyncExitStack() as stack:
+            if config.options_agent_enabled:
+                await stack.enter_async_context(app.state.options_agent.mcp.lifespan())
+            await app.state.options_monitoring_service.start()
+            await app.state.options_scanner_service.start()
+            await app.state.options_backtest_service.start()
+            task=asyncio.create_task(match_loop())
+            sfeed_task=asyncio.create_task(sfeed_loop())
+            try:
+                yield
+            finally:
+                await app.state.options_backtest_service.stop()
+                await app.state.options_scanner_service.stop()
+                await app.state.options_monitoring_service.stop()
+                task.cancel()
+                sfeed_task.cancel()
+                try:
+                    await asyncio.gather(task,sfeed_task,return_exceptions=True)
+                except asyncio.CancelledError:
+                    pass
+                market.broker.close()
 
     @asynccontextmanager
     async def lifespan(app):
-        task=asyncio.create_task(match_loop())
-        sfeed_task=asyncio.create_task(sfeed_loop())
-        yield
-        task.cancel()
-        sfeed_task.cancel()
+        # Workers are shared by the app and their tasks belong to the event loop
+        # that starts them. A nested client can use the app without owning shutdown.
+        if not lifespan_lock.acquire(blocking=False):
+            yield
+            return
         try:
-            await asyncio.gather(task,sfeed_task,return_exceptions=True)
-        except asyncio.CancelledError:
-            pass
-        market.broker.close()
+            async with owned_lifespan(app):
+                yield
+        finally:
+            lifespan_lock.release()
 
     app=FastAPI(title='NeoDesk',version='0.3.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
-    app.state.store,app.state.market,app.state.paper,app.state.risk_manager=store,market,paper,risk_manager
+    app.state.store,app.state.market,app.state.paper,app.state.risk_manager,app.state.discovery,app.state.strategy_engine=store,market,paper,risk_manager,discovery,strategy_engine
+    app.state.jwt_secret = config.jwt_secret
+    app.state.config = config
+    from app.terminal.options_agent import OptionsAgent
+    from app.terminal.portfolio_service import PortfolioSnapshotService
+    app.state.portfolio_risk_store = portfolio_risk_store
+    app.state.portfolio_service = PortfolioSnapshotService(market, store)
+    app.state.options_agent = OptionsAgent(config, store, market, portfolio_service=app.state.portfolio_service, risk_store=portfolio_risk_store)
+    from app.terminal.options_platform_store import OptionsPlatformStore
+    from app.terminal.options_platform_service import OptionsPlatformService
+    app.state.options_platform_store = OptionsPlatformStore(store)
+    app.state.options_platform_service = OptionsPlatformService(app.state.options_agent, app.state.options_platform_store)
+    from app.terminal.options_monitoring import OptionsMonitoringService
+    app.state.options_monitoring_service = OptionsMonitoringService(app.state.options_platform_service)
+    app.state.options_agent.monitoring_service = app.state.options_monitoring_service
+    from app.terminal.options_scan_jobs import OptionsScannerService
+    app.state.options_scanner_service = OptionsScannerService(app.state.options_platform_service)
+    from app.terminal.options_backtest_jobs import BacktestService
+    app.state.options_backtest_service = BacktestService(app.state.options_platform_store)
+    app.state.catalogue_lock = sync_lock
+    app.state.catalogue_sync = sync_status
+    app.state.is_production = (config.environment == 'production')
     app.add_middleware(CORSMiddleware,allow_origins=[config.frontend_url],allow_credentials=True,
-                       allow_methods=['GET','POST','DELETE'],allow_headers=['Content-Type','X-NeoDesk'])
+                       allow_methods=['GET','POST','PUT','DELETE'],allow_headers=['Content-Type','X-NeoDesk','Authorization'])
 
-    def authenticated(request):
-        if not config.app_password:
-            return config.environment != 'production' and request.client and request.client.host in ('127.0.0.1','::1','testclient')
-        token=request.cookies.get('neodesk_session','')
-        return sessions.get(hashlib.sha256(token.encode()).hexdigest(),0)>time.time()
+    def authenticated(request: Request):
+        # 1. Try JWT from Authorization header or neodesk_token cookie
+        token = None
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:].strip()
+        elif 'neodesk_token' in request.cookies:
+            token = request.cookies.get('neodesk_token')
+
+        if token:
+            try:
+                payload = decode_token(token, config.jwt_secret)
+                user = store.get_user_by_id(payload['user_id'])
+                if user:
+                    request.state.user = {
+                        'id': user['id'],
+                        'email': user['email'],
+                        'display_name': user['display_name'],
+                        'created_at': user['created_at'],
+                    }
+                    return True
+                return False
+            except Exception:
+                return False
+
+        # 2. Backward compatibility fallback: APP_PASSWORD flow
+        if config.app_password:
+            token = request.cookies.get('neodesk_session', '')
+            return sessions.get(hashlib.sha256(token.encode()).hexdigest(), 0) > time.time()
+        return config.environment == 'test' and request.client and request.client.host in ('127.0.0.1', '::1', 'testclient')
 
     @app.middleware('http')
     async def protect(request: Request, call_next):
         if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/ws/stream'):
-            public=request.url.path in ('/api/health','/api/session','/api/login')
+            norm_path = request.url.path.rstrip('/')
+            public = norm_path in ('/api/health', '/api/auth/register', '/api/auth/login', '/api/auth/kotak-login', '/api/session', '/api/login')
             if request.method != 'OPTIONS' and not public and not authenticated(request):
-                return JSONResponse({'detail':'Sign in to your terminal.'},status_code=401)
-            if request.method not in ('GET','HEAD','OPTIONS'):
-                origin=request.headers.get('origin')
-                same=f'{request.url.scheme}://{request.url.netloc}'
-                if request.headers.get('x-neodesk')!='1' or (origin and origin not in (config.frontend_url,same,os.getenv('RENDER_EXTERNAL_URL'))):
-                    return JSONResponse({'detail':'Request origin rejected.'},status_code=403)
-        response=await call_next(request)
-        response.headers['X-Content-Type-Options']='nosniff'
-        response.headers['X-Frame-Options']='DENY'
-        response.headers['Referrer-Policy']='no-referrer'
+                return JSONResponse({'detail': 'Sign in to your terminal.'}, status_code=401)
+            if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+                origin = request.headers.get('origin')
+                same = f'{request.url.scheme}://{request.url.netloc}'
+                if request.headers.get('x-neodesk') != '1' or (origin and origin not in (config.frontend_url, same, os.getenv('RENDER_EXTERNAL_URL'))):
+                    return JSONResponse({'detail': 'Request origin rejected.'}, status_code=403)
+        response = await call_next(request)
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Referrer-Policy'] = 'no-referrer'
         if request.url.path.startswith('/api/'):
-            response.headers['Cache-Control']='no-store'
+            response.headers['Cache-Control'] = 'no-store'
         return response
 
     @app.websocket('/api/ws/stream')
     async def websocket_endpoint(websocket: WebSocket):
-        if config.app_password:
-            token = websocket.cookies.get('neodesk_session', '')
-            if sessions.get(hashlib.sha256(token.encode()).hexdigest(), 0) < time.time():
-                await websocket.close(code=1008)
-                return
+        token = websocket.query_params.get('token') or websocket.cookies.get('neodesk_token')
+        auth_ok = False
+        user_id = 1
+        if token:
+            try:
+                payload = decode_token(token, config.jwt_secret)
+                if store.get_user_by_id(payload['user_id']):
+                    auth_ok = True
+                    user_id = payload['user_id']
+            except Exception:
+                pass
+        if not token and config.app_password:
+            legacy_token = websocket.cookies.get('neodesk_session', '')
+            if sessions.get(hashlib.sha256(legacy_token.encode()).hexdigest(), 0) >= time.time():
+                auth_ok = True
+        elif not token and not config.app_password and config.environment == 'test':
+            auth_ok = True
+
+        if not auth_ok:
+            await websocket.close(code=1008)
+            return
         
-        await manager.connect(websocket)
+        await manager.connect(websocket,user_id=user_id)
         try:
             while True:
                 await websocket.receive_text()
@@ -199,7 +272,7 @@ def create_app(config: Settings):
 
     @app.get('/api/session')
     def session(request: Request):
-        return {'authenticated':bool(authenticated(request)), 'password_required':bool(config.app_password)}
+        return {'authenticated':bool(authenticated(request)), 'password_required':bool(config.app_password), 'user': getattr(request.state, 'user', None)}
 
     @app.post('/api/login')
     def login(body: Password,request: Request,response: Response):
@@ -220,44 +293,54 @@ def create_app(config: Settings):
 
     @app.post('/api/logout')
     def logout(request: Request,response: Response):
+        # Deprecated: use /api/auth/logout instead.
         sessions.pop(hashlib.sha256(request.cookies.get('neodesk_session','').encode()).hexdigest(),None)
         response.delete_cookie('neodesk_session')
+        response.delete_cookie('neodesk_token')
         return {'ok':True}
 
+    def get_req_user_id(request: Request | None) -> int:
+        if not request:
+            return 1
+        user = getattr(request.state, 'user', None)
+        return user['id'] if user else 1
+
     @app.get('/api/status')
-    def status():
-        return {'mode':'paper','live_trading_enabled':False,'market_data_source':market.source,
-                'kotak_api_key_configured':bool(market.config.kotak_consumer_key),
-                'broker_authenticated':market.broker.is_authenticated,'catalogue':store.metadata(),
+    def status(request: Request = None):
+        uid = get_req_user_id(request)
+        sess = market.get_session(uid)
+        return {'mode':'paper','live_trading_enabled':config.live_trading_enabled,'market_data_source':sess.source,
+                'kotak_api_key_configured':bool(sess.config.kotak_consumer_key),
+                'broker_authenticated':sess.broker.is_authenticated,'catalogue':store.metadata(),
                 'catalogue_sync':sync_status,'paper_starting_balance':config.paper_starting_balance,
-                'market_error':market.last_error}
+                'market_error':sess.last_error,'orders_stopped':risk_manager.for_user(uid).kill_switch_active}
 
     @app.post('/api/connection')
-    def connect(body: Credentials):
-        market.connect(body.consumer_key.get_secret_value())
-        return status()
+    def connect(body: Credentials, request: Request = None):
+        uid = get_req_user_id(request)
+        market.connect(body.consumer_key.get_secret_value(), user_id=uid)
+        return status(request)
 
     @app.delete('/api/connection')
-    def disconnect():
-        market.disconnect()
-        return status()
+    def disconnect(request: Request = None):
+        uid = get_req_user_id(request)
+        market.disconnect(user_id=uid)
+        return status(request)
 
     @app.post('/api/connection/login')
-    def broker_login(body: BrokerLogin):
-        with market.lock:
-            if market.source!='kotak':
-                raise ValueError('Connect the consumer key first.')
-            market.config.kotak_ucc=body.ucc
-            market.config.kotak_mobile_number=body.mobile
-            market.broker.login(body.totp.get_secret_value(),body.mpin.get_secret_value())
-        return {'authenticated':market.broker.is_authenticated}
+    def broker_login(body: BrokerLogin, request: Request = None):
+        uid = get_req_user_id(request)
+        is_auth = market.broker_login(body.ucc, body.mobile, body.totp.get_secret_value(), body.mpin.get_secret_value(), user_id=uid)
+        return {'authenticated': is_auth}
 
     @app.get('/api/broker/account')
-    def broker_account():
-        if not market.broker.is_authenticated:
+    def broker_account(request: Request = None):
+        uid = get_req_user_id(request)
+        sess = market.get_session(uid)
+        if not sess.broker.is_authenticated:
             raise HTTPException(401,'Complete Kotak TOTP/MPIN login in Connections.')
-        limits=market.call('limits')
-        positions=market.call('positions')
+        limits=market.call('limits', user_id=uid)
+        positions=market.call('positions', user_id=uid)
         if not isinstance(limits,dict) or not isinstance(positions,dict):
             raise BrokerError('Unexpected account response; please reconnect.')
         records=positions.get('data',[])
@@ -268,9 +351,10 @@ def create_app(config: Settings):
         return {'funds':{k:limits.get(k) for k in ('Net','MarginUsed','CollateralValue','RealizedMtomPrsnt','UnrealizedMtomPrsnt')},
                 'positions':[{k:r.get(k) for k in allowed if k in r} for r in records if isinstance(r,dict)]}
 
-    async def do_sync():
+
+    async def do_sync(user_id=1):
         try:
-            await run_in_threadpool(market.sync)
+            await run_in_threadpool(market.sync,user_id=user_id)
         except Exception:
             sync_status['error']='Catalogue sync failed. Check the broker connection and retry; previous catalogue retained.'
         finally:
@@ -278,233 +362,35 @@ def create_app(config: Settings):
             sync_lock.release()
 
     @app.post('/api/instruments/sync',status_code=202)
-    async def sync():
-        if market.source!='kotak':
+    async def sync(request: Request = None):
+        uid = get_req_user_id(request)
+        sess = market.get_session(uid)
+        if sess.source != 'kotak' and market.source != 'kotak':
             raise ValueError('Connect Kotak first.')
         if not sync_lock.acquire(blocking=False):
             raise HTTPException(409,'Catalogue sync is already running.')
         sync_status.update(running=True,error=None)
-        asyncio.create_task(do_sync())
+        asyncio.create_task(do_sync(uid))
         return {'running':True}
 
-    @app.get('/api/instruments')
-    def instruments(q: str='',exchange: str='',kind: str='',sort: Literal['symbol','symbol_desc','exchange','kind']='symbol',offset: int=0,limit: int=40):
-        return store.search(q[:100],exchange,kind,sort,max(0,offset),max(1,min(100,limit)))
-
-    @app.get('/api/watchlist')
-    def watchlist():
-        return store.watchlist()
-
-    @app.get('/api/stocks')
-    def stocks(q: str='',exchange: str='',kind: str='EQUITY',sort: Literal['symbol','symbol_desc','exchange','kind']='symbol',offset: int=0,limit: int=25):
-        return store.search(q[:100],exchange,kind,sort,max(0,offset),max(1,min(limit,100)),scope='stocks')
-
-    @app.get('/api/indices')
-    def indices(q: str=''):
-        return discovery.indices(q[:100])
-
-    @app.get('/api/contracts')
-    def contracts(underlying: str,exchange: Literal['nse_fo','bse_fo']='nse_fo',kind: Literal['OPTION','FUTURE']='OPTION',expiry: str='',option_type: str='',offset: int=0,limit: int=30,strike: float | None=None):
-        return discovery.contracts(underlying[:50],exchange,kind,expiry,option_type,max(0,offset),max(1,min(limit,50)),strike)
-
-    @app.get('/api/market/activity')
-    def activity(scope: Literal['stocks','indices']='stocks',metric: Literal['volume','turnover']='volume'):
-        return discovery.activity(scope,metric)
-
-    @app.get('/api/instruments/{identifier}')
-    def instrument(identifier: str):
-        return store.instrument(identifier)
-
-    @app.get('/api/instrument-detail')
-    def instrument_detail(instrument_id: str):
-        item=store.instrument(instrument_id)
-        variants=[item]
-        with store.connect() as db:
-            if item['kind'] in ('EQUITY','ETF') and item.get('isin'):
-                variants=[json.loads(r[0]) for r in db.execute("SELECT payload FROM instruments WHERE kind=? AND exchange IN ('nse_cm','bse_cm') AND json_extract(payload,'$.isin')=? ORDER BY exchange DESC",(item['kind'],item['isin']))]
-            held=db.execute('SELECT quantity FROM positions WHERE instrument_id=?',(instrument_id,)).fetchone()
-        return {'instrument':item,'variants':variants,'paper_quantity':held[0] if held else 0}
-
-    @app.post('/api/watchlist')
-    def watch(body: QuoteRequest):
-        for identifier in body.ids:
-            store.watch(identifier)
-        return store.watchlist()
-
-    @app.delete('/api/watchlist/{identifier}')
-    def unwatch(identifier: str):
-        store.watch(identifier,False)
-        return store.watchlist()
-
-    @app.post('/api/market/quotes')
-    def quotes(body: QuoteRequest):
-        return market.quotes(body.ids)
-
-    @app.get('/api/market/quotes')
-    def watch_quotes():
-        return market.quotes([i['id'] for i in store.watchlist()])
-
-    @app.get('/api/market/history')
-    def history(instrument_id: str,interval: Literal['1min','5min','15min','60min','D']='D',days: int=365):
-        result=market.history(instrument_id,interval,max(1,days))
-        return {**result,'indicators':indicators(result['candles'])}
-
-    @app.get('/api/market/expiries')
-    def expiries(underlying: str='NIFTY',exchange: Literal['nse_fo','bse_fo']='nse_fo'):
-        return market.call('expiries',exchange=exchange,underlying=underlying[:50],instrument_type='option')
-
-    @app.get('/api/market/chain')
-    def chain(underlying: str='NIFTY',exchange: Literal['nse_fo','bse_fo']='nse_fo',expiry: str | None=None):
-        raw=market.call('option_chain',exchange=exchange,underlying=underlying[:50],expiry=expiry,instrument_type='option',count=20)
-        data=raw.get('data',raw) if isinstance(raw,dict) else None
-        if not isinstance(data,dict) or not all(k in data for k in ('common_data','call','put')):
-            raise BrokerError('Unexpected option-chain response.')
-        try:
-            def leg(row):
-                instrument=row.get('instrument',row.get('inst'))
-                quote=row['quote']
-                oi=row.get('openInterest',row.get('oi',{}))
-                return {'instrument':{'neoSymbol':instrument['neoSymbol'],'symbol':instrument['symbol'],
-                        'strikePrice':str(instrument.get('strikePrice',instrument.get('strkPrc'))),
-                        'moneyness':instrument.get('moneyness','')},
-                        'quote':{'ltp':float(quote['ltp']),'volume':float(quote.get('volume',quote.get('vol',0)))},
-                        'openInterest':{'current':float(oi.get('current',oi.get('cur',0)))}}
-            return {'common_data':data['common_data'],'call':[leg(r) for r in data['call']],
-                    'put':[leg(r) for r in data['put']]}
-        except (KeyError,TypeError,ValueError):
-            raise BrokerError('Unexpected option-chain fields.') from None
-
-    @app.get('/api/paper')
-    def account():
-        with store.connect() as db:
-            ids=[r[0] for r in db.execute('SELECT instrument_id FROM positions WHERE quantity>0 UNION SELECT instrument_id FROM futures_positions WHERE quantity<>0')]
-            source=db.execute("SELECT value FROM metadata WHERE key='paper_source'").fetchone()
-        quotes={}
-        error=None
-        if source and source[0]!=market.source:
-            error='Connect the original data source to value these holdings. Reset the account to change sources.'
-        else:
-            try:
-                quotes=quote_map(ids)
-            except (BrokerError,ValueError):
-                error='Valuation unavailable; cash and holdings are retained.'
-        return {**paper.snapshot(quotes),'source':source[0] if source else market.source,'valuation_error':error}
-
-    @app.post('/api/paper/orders',status_code=201)
-    def order(body: PaperOrder):
-        instrument=store.instrument(body.instrument_id)
-        if body.order_type=='LIMIT' and body.limit_price is None:
-            raise ValueError('A limit order needs a limit price.')
-        rows=market.quotes([body.instrument_id])
-        if not rows:
-            raise BrokerError('No usable price is available for this instrument. Order was not submitted.')
-        quote=rows[0]
-        return paper.submit(instrument,body.side,body.quantity,body.order_type,body.limit_price,str(body.request_id),quote)
-
-    @app.delete('/api/paper/orders/{identifier}')
-    def cancel(identifier: str):
-        paper.cancel(identifier)
-        return {'ok':True}
-
-    @app.post('/api/paper/reset')
-    def reset(body: dict):
-        if body.get('confirmation')!='RESET PAPER ACCOUNT':
-            raise ValueError('Type RESET PAPER ACCOUNT to confirm.')
-        with store.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            db.execute('DELETE FROM positions')
-            db.execute('DELETE FROM futures_positions')
-            db.execute('DELETE FROM orders')
-            db.execute('UPDATE account SET cash=initial,realized=0 WHERE id=1')
-            db.execute("DELETE FROM metadata WHERE key='paper_source'")
-        store.audit('paper_reset','User confirmed paper account reset.')
-        return account()
-
-    @app.post('/api/strategies/backtest')
-    def strategy(body: BacktestRequest):
-        instrument=store.instrument(body.instrument_id)
-        if instrument['kind'] not in ('EQUITY','ETF','INDEX'):
-            raise ValueError('This strategy tester supports stocks, ETFs and index studies only.')
-        data=market.history(body.instrument_id,'D',365)
-        if data.get('partial'):
-            raise BrokerError('Backtest blocked: historical data is incomplete. Try again when Kotak history is available.')
-        return {**backtest(data['candles'],body.initial,body.fast,body.slow,body.fee_bps,body.slippage_bps),
-                'source':data['source'],'instrument':instrument['symbol'],'note':data['note']}
-
-    @app.post('/api/strategies/deploy')
-    def deploy_strategy(body: DeployRequest):
-        params = body.params or {'fast': body.fast, 'slow': body.slow}
-        sid = strategy_engine.deploy(
-            instrument_id=body.instrument_id,
-            strategy_type=body.strategy_type,
-            params=params,
-            initial=body.initial,
-            mode=body.mode,
-            name=body.name
-        )
-        return {'id': sid, 'status': 'RUNNING'}
-
-    @app.get('/api/strategies/active')
-    def active_strategies():
-        return strategy_engine.list_active()
-
-    @app.get('/api/strategies/{sid}')
-    def get_strategy(sid: str):
-        strat = strategy_engine.get_strategy(sid)
-        if not strat:
-            raise HTTPException(status_code=404, detail="Strategy not found")
-        return strat
-
-    @app.get('/api/strategies/{sid}/signals')
-    def strategy_signals(sid: str, limit: int = 50):
-        return store.get_signals(strategy_id=sid, limit=limit)
-
-    @app.get('/api/signals/recent')
-    def recent_signals(limit: int = 50):
-        return store.get_signals(limit=limit)
-
-    @app.delete('/api/strategies/{sid}')
-    def stop_strategy(sid: str):
-        strategy_engine.stop(sid)
-        return {'ok': True}
-
-    @app.post('/api/strategies/{sid}/pause')
-    def pause_strategy(sid: str):
-        strategy_engine.pause(sid)
-        return {'ok': True}
-
-    @app.post('/api/strategies/{sid}/resume')
-    def resume_strategy(sid: str):
-        strategy_engine.resume(sid)
-        return {'ok': True}
-
-    class KillSwitchRequest(BaseModel):
-        reason: str
-
-    @app.get('/api/risk/status')
-    def get_risk_status():
-        return risk_manager.get_status()
-
-    @app.post('/api/risk/kill-switch')
-    def trigger_kill_switch(body: KillSwitchRequest):
-        risk_manager.trigger_kill_switch(body.reason)
-        store.audit('risk_kill_switch', f"Kill switch triggered: {body.reason}")
-        return risk_manager.get_status()
-
-    @app.post('/api/risk/reset-kill-switch')
-    def reset_kill_switch():
-        risk_manager.reset_kill_switch()
-        store.audit('risk_kill_switch', "Kill switch reset")
-        return risk_manager.get_status()
-
-    @app.put('/api/risk/limits')
-    def update_risk_limits(limits: RiskLimits):
-        risk_manager.limits = limits
-        store.audit('risk_limits_updated', "Risk limits updated")
-        return risk_manager.get_status()
+    
+    from app.terminal.routers.market import market_router
+    from app.terminal.routers.paper import paper_router
+    from app.terminal.routers.strategy import strategy_router
+    from app.terminal.routers.risk import risk_router
+    
+    app.include_router(market_router)
+    app.include_router(paper_router)
+    app.include_router(strategy_router)
+    app.include_router(risk_router)
 
     from app.terminal.live import live_router
     app.include_router(live_router, prefix="/api")
+    app.include_router(auth_router)
+    from app.terminal.routers.options_agent import options_agent_router
+    app.include_router(options_agent_router)
+    from app.terminal.routers.options_platform import options_platform_router
+    app.include_router(options_platform_router)
 
     static=PROJECT_ROOT / 'frontend' / 'out'
     if static.exists():

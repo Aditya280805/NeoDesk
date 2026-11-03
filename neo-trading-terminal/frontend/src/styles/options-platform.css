@@ -1,0 +1,25 @@
+.options-platform { --border: var(--line); --surface: var(--panel); --danger: var(--red); max-width: 1440px; margin: 0 auto; }
+.op-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+.op-tabs button[aria-current] { border-color: var(--accent); color: var(--accent); }
+.op-panel { border: 1px solid var(--border); background: var(--surface); padding: 1rem; margin: 1rem 0; border-radius: .5rem; min-width: 0; }
+.op-panel h2 { font-size: 1.15rem; margin: 0 0 .75rem; }
+.op-panel h3 { font-size: 1rem; }
+.op-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; margin: .75rem 0; }
+.options-platform label { display: flex; flex-direction: column; gap: .5rem; font-size: .875rem; }
+.options-platform label:has(input[type=checkbox]) { flex-direction: row; align-items: start; padding: .5rem 0; }
+.options-platform input:not([type=checkbox]), .options-platform select, .options-platform textarea { display: block; width: 100%; min-width: 0; padding: .625rem; border: 1px solid var(--border); background: var(--bg); color: inherit; border-radius: .25rem; }
+.options-platform input[type=checkbox] { width: 1rem; height: 1rem; flex-shrink: 0; }
+.options-platform button { border: 1px solid var(--border); padding: .625rem .75rem; border-radius: .25rem; margin: .25rem; background: var(--surface); color: inherit; cursor: pointer; }
+.options-platform button:disabled { opacity: .5; cursor: default; }
+.options-platform :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.options-platform fieldset { border: 1px solid var(--border); padding: .75rem; margin: .75rem 0; }
+.options-platform p { line-height: 1.6; overflow-wrap: anywhere; }
+.options-platform pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.op-evidence { margin: .75rem 0; }
+.op-evidence > div { display: grid; grid-template-columns: minmax(120px, 1fr) 3fr; gap: .75rem; border-bottom: 1px solid var(--border); padding: .5rem 0; }
+.op-evidence dt { text-transform: capitalize; opacity: .75; }
+.op-evidence dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.options-platform details { padding: .5rem; border-left: 1px solid var(--border); }
+.options-platform summary { cursor: pointer; overflow-wrap: anywhere; }
+.op-error { border: 1px solid var(--danger); padding: .75rem; }
+@media(max-width: 600px) { .op-fields { grid-template-columns: 1fr; } .op-evidence > div { grid-template-columns: 1fr; gap: .25rem; } .op-panel { padding: .75rem; } }

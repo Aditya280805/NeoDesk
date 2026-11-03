@@ -1,0 +1,29 @@
+{
+  "dataset_id": "00000000-0000-0000-0000-000000000001",
+  "kind": "collar",
+  "mode": "hypothetical",
+  "entries": [{
+    "decision_at": "2026-01-01T09:00:00+05:30",
+    "stock_contract_id": "S",
+    "call_contract_id": "C",
+    "put_contract_id": "P",
+    "quantity": 10
+  }],
+  "start": "2026-01-01T09:00:00+05:30",
+  "end": "2026-01-29T15:30:00+05:30",
+  "initial_capital": "2000",
+  "costs": {
+    "version": "historical-costs.1",
+    "source": "synthetic example user assumptions",
+    "opening_fee_inr": "1",
+    "expiry_fee_inr": "1",
+    "slippage_per_unit": "0.1"
+  },
+  "fill_policy": "depth_required",
+  "quote_max_age_seconds": 120,
+  "valuation_times": [
+    "2026-01-01T09:00:00+05:30",
+    "2026-01-01T09:01:00+05:30",
+    "2026-01-29T15:30:00+05:30"
+  ]
+}

@@ -1,0 +1,50 @@
+/* Loaded last: semantic light surfaces and readable text for legacy components. */
+html.light {
+  color-scheme: light;
+  --text: #172033;
+  --muted: #526176;
+  --line: #cbd5e1;
+  --accent: #1d4ed8;
+  --green: #047857;
+  --red: #b91c1c;
+  --gold: #92400e;
+}
+html.dark { color-scheme: dark; }
+.light :is(label, td, .symbol, .symbol-link, .index-card-top,
+  .overview-links h2, .data-panel-card h3, .ticket-symbol strong,
+  .instrument-title h1, .back-button, .range-summary span) { color: var(--text); }
+.light :is(th, .metric-label, .metric small, .nav-label, .sidebar nav a,
+  .account-avatar, .mode-pills button, .discovery-search>span, .activity-card small,
+  .rank, .contract-description, .index-card-top small, .index-card>small,
+  .instrument-name, .tag, .pagination, .info-strip, .info-strip a,
+  .empty-state, .empty-state small, .fine-print, .chart-credit, .chart-credit a,
+  .chain-heading, footer, .holding-label, .price-timestamp, .exchange-switch button,
+  .instrument-tabs button, .chart-empty, .range-buttons button, .instrument-actions,
+  .instrument-stats span, .side-toggle button) { color: var(--muted); }
+.light :is(input::placeholder, textarea::placeholder) { color: #64748b; opacity: 1; }
+.light :is(.sidebar nav a.selected, .auth-help, .auth-alternative button,
+  .watch-action, .watch-action.saved, .instrument-tabs button.active) { color: var(--accent); }
+.light :is(.mode-pills button.selected, .contract-tabs button.active,
+  .range-selector button.active, .range-buttons button.active,
+  .chart-actions button, .chart-actions a) { color: #1e40af; background: #dbeafe; }
+.light .mode-pills button.live-btn.selected { color: #991b1b; background: #fee2e2; }
+.light :is(.instrument-detail, .instrument-stats) { background: var(--panel); border-color: var(--line); }
+.light :is(.instrument-tabs, .instrument-actions, .index-card) { border-color: var(--line); }
+.light .index-card:hover { background: var(--panel-hover); }
+.light .radio-dot.active { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--panel); }
+.light .error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.light .success { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+.light :is(.demo-banner, .detail-notice, .badge.amber, .broker-mode-banner) { background: #fffbeb; border-color: #d4b56a; color: #78350f; }
+.light .strike { color: #78350f; }
+.light :is(.primary, .side-toggle .buy.selected) { color: #fff; background: #1d4ed8; }
+.light :is(.sell-button, .side-toggle .sell.selected) { color: #fff; background: #b91c1c; }
+.light .detail-buy { background: #1d4ed8 !important; }
+.light .detail-sell { background: #c2410c !important; }
+.light .side-toggle button:hover:not(.selected) { color: var(--text); background: var(--panel-hover); }
+.light :is(.positive, .chain-heading span:first-child) { color: var(--green); }
+.light :is(.negative, .chain-heading span:last-child) { color: var(--red); }
+.light .otm { opacity: 1; }
+.light :is(button, a, input, select):focus-visible { outline: 2px solid #1d4ed8; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .live-tick, .negative.live-tick { animation: none; }
+}

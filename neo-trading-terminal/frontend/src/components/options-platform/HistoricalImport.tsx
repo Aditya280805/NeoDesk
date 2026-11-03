@@ -1,0 +1,24 @@
+import { useEffect, useRef, useState } from 'react'
+import { integer } from '@/lib/optionsPlatform'
+import { ActionForm, choices, Evidence, Fields, InputFields } from './Forms'
+import { useWorkspace } from './Workspace'
+
+export default function HistoricalImport({ onImported }: { onImported: () => void }) {
+  const { request, busy } = useWorkspace(), generation = useRef(0)
+  const [file, setFile] = useState<File | null>(null), [error, setError] = useState(''), [result, setResult] = useState<unknown>()
+  const [v, setV] = useState<Fields>({ provenance: '', licence: '', dataset_status: 'user_import', format: 'csv' })
+  const [windows, setWindows] = useState<Fields[]>([{ contract_id: '', start: '', end: '', interval_seconds: '60' }])
+  useEffect(() => () => { generation.current++ }, [])
+  async function upload() {
+    const ticket = ++generation.current
+    try {
+      setError(''); if (!file || file.size > 10 * 1024 * 1024) throw new Error('Select a CSV or Parquet file of at most 10 MiB.')
+      const expected_intervals = windows.map(w => ({ ...w, interval_seconds: integer(w.interval_seconds, 1, 604800) }))
+      const source = v.format === 'csv' ? { csv_text: await file.text() } : { parquet_base64: await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('File could not be read')); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file) }) }
+      if (ticket !== generation.current) return
+      const data = await request('/historical-imports', 'POST', { ...v, expected_intervals, ...source })
+      if (data !== undefined && ticket === generation.current) { setResult(data); onImported() }
+    } catch (e) { if (ticket === generation.current) setError((e as Error).message) }
+  }
+  return <ActionForm title="Import historical CSV or Parquet" action="Validate and import file" disabled={busy || !file} onSubmit={() => void upload()}><p>Private user import or explicitly synthetic data. Validation does not establish live exchange verification, licence rights or current settlement rules.</p>{error && <p role="alert">{error}</p>}<InputFields values={v} onChange={setV} specs={[{ key: 'format', label: 'File format', options: choices('csv', 'parquet') }, { key: 'dataset_status', label: 'Dataset provenance class', options: choices('user_import', 'synthetic') }, { key: 'provenance', label: 'Source provenance' }, { key: 'licence', label: 'Licence declaration' }]} /><label>Historical data file<input type="file" accept=".csv,.parquet" onChange={e => { generation.current++; setFile(e.target.files?.[0] ?? null) }} /></label><p>Each expected source session window is explicit; do not invent overnight coverage.</p>{windows.map((w, i) => <fieldset key={i}><legend>Expected quote window {i + 1}</legend><InputFields values={w} onChange={next => setWindows(windows.map((x, j) => j === i ? next : x))} specs={[{ key: 'contract_id', label: 'Window contract ID' }, { key: 'start', label: 'Window start with offset' }, { key: 'end', label: 'Window end with offset' }, { key: 'interval_seconds', label: 'Expected quote interval seconds' }]} /></fieldset>)}<button type="button" disabled={windows.length >= 1000} onClick={() => setWindows([...windows, { contract_id: '', start: '', end: '', interval_seconds: '60' }])}>Add source window</button><details><summary>File schema and synthetic example</summary><p>options-history.1: every row requires row_type, record_id, contract_id, timestamp, effective_at, known_at, source. Offset timestamps required; record IDs unique. All financial values are decimal text (12 decimal places maximum), absent cells stay empty. Parquet has the same columns with string or decimal financial fields, string/null other fields. Floats and additional columns are rejected.</p><p>contract: kind equity/call/put, underlying_id, exchange NSE, currency INR, positive lot_size; options require expiry and strike; deliverable_quantity 1, adjustment_id, settlement_rule physical-european.1. quote: bid, ask, optional bid_quantity and ask_quantity. settlement: price, settlement_rule, verified true (dataset provider declaration). corporate_action: action cash_dividend/split, amount/ratio, adjustment_id, adjusted_contract_ids separated with |.</p><pre>{'row_type,record_id,contract_id,timestamp,effective_at,known_at,source,bid,ask,bid_quantity,ask_quantity\nquote,q-S-0,S,2026-01-01T09:00:00+05:30,2026-01-01T09:00:00+05:30,2026-01-01T09:00:00+05:30,synthetic-example,99,100,10,10'}</pre><p>This single quote illustrates encoding; a usable dataset also needs explicit contract versions, expected windows, subsequent fill quotes and settlement events. Missing coverage fails closed.</p></details><Evidence value={result ?? 'No validation result'} /></ActionForm>
+}

@@ -1,7 +1,18 @@
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
 pydantic-settings==2.9.1
 httpx==0.28.1
 pytest==8.3.5
 # Official Kotak SDK; used from Phase 2 after paper-mode validation.
 kotakneoapi==3.0.7
+bcrypt
+PyJWT
+email-validator
+# Read-only options chat agent. Model credentials stay on the backend.
+agno[mcp]==3.1.10
+mcp==2.3.0
+fastmcp==4.1.4
+openai==2.54.0
+google-genai==2.33.0
+# Bounded CSV/Parquet historical import; CPython 3.12 Windows wheel verified.
+pyarrow==20.0.0

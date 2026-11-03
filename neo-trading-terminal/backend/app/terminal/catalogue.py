@@ -1,5 +1,6 @@
 """Normalised catalogue fields shared by discovery and paper execution."""
 from datetime import UTC, datetime, timedelta, timezone
+import re
 
 IST = timezone(timedelta(hours=5, minutes=30))
 INDEX_NAMES = {'NIFTY':'Nifty 50', 'BANKNIFTY':'Nifty Bank', 'FINNIFTY':'Nifty Financial Services',
@@ -37,6 +38,8 @@ def normalise(item):
                 item['kind'] = 'FUTURE'
     elif 'MUTUAL FUND' in item.get('name', '').upper() and item['kind'] == 'EQUITY':
         item['kind'] = 'OTHER'
+    if item['kind']=='EQUITY' and item['exchange'].endswith('_cm') and re.search(r'\b(?:NCD|DEBENTURES?|NON[- ]CONVERTIBLE)\b',item.get('name',''),re.I):
+        item['kind']='OTHER'
     item['display_name'] = INDEX_NAMES.get(item['symbol'], item['name']) if item['kind'] == 'INDEX' else item['name']
     return item
 

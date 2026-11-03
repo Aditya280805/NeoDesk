@@ -29,12 +29,20 @@ MANIFEST
 .env.*
 !.env.example
 .venv/
+.venv-harness/
 .pytest_cache/
 .test-runs/
 .next/
 *.tsbuildinfo
+# Database and storage
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
 data/
 out/
+.pytest-tmp-debug/
 
 # IDE
 .idea/
@@ -50,4 +58,6 @@ build/
 .DS_Store
 
 # Log files
+logs/
 *.log
+*.log.*

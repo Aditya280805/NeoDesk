@@ -1,0 +1,11 @@
+{
+  "common_data": {"expiryDt": "29Oct2026", "underlying": "NIFTY", "exchange": "nse_fo", "mktLot": 65},
+  "call": [
+    {"instrument": {"symbol": "NIFTY-24000-C", "strikePrice": 24000}, "quote": {"ltp": 110, "volume": 20}, "openInterest": {"current": 100}},
+    {"instrument": {"symbol": "NIFTY-24100-C", "strikePrice": 24100}, "quote": {"ltp": 60, "volume": 30}, "openInterest": {"current": 300}}
+  ],
+  "put": [
+    {"instrument": {"symbol": "NIFTY-24000-P", "strikePrice": 24000}, "quote": {"ltp": 90, "volume": 40}, "openInterest": {"current": 200}},
+    {"instrument": {"symbol": "NIFTY-24100-P", "strikePrice": 24100}, "quote": {"ltp": 140, "volume": 50}, "openInterest": {"current": 400}}
+  ]
+}

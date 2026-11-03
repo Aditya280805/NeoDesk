@@ -28,9 +28,11 @@ class WebSocketService {
         if (!url) return;
 
         this.isIntentionallyClosed = false;
-        this.ws = new WebSocket(url);
+        const socket = new WebSocket(url);
+        this.ws = socket;
 
         this.ws.onopen = () => {
+            if (this.ws !== socket) return;
             useMarketStore.getState().setConnected(true);
             if (this.reconnectTimer) {
                 clearTimeout(this.reconnectTimer);
@@ -39,6 +41,7 @@ class WebSocketService {
         };
 
         this.ws.onmessage = (event) => {
+            if (this.ws !== socket) return;
             try {
                 const message = JSON.parse(event.data);
                 if (message.type === 'QUOTE' && message.data) {
@@ -55,6 +58,7 @@ class WebSocketService {
         };
 
         this.ws.onclose = () => {
+            if (this.ws !== socket) return;
             useMarketStore.getState().setConnected(false);
             this.ws = null;
             this.attemptReconnect();
@@ -62,7 +66,7 @@ class WebSocketService {
 
         this.ws.onerror = () => {
             // Error handling, closing the socket will trigger onclose and reconnect
-            this.ws?.close();
+            socket.close();
         };
     }
 
@@ -79,6 +83,7 @@ class WebSocketService {
 
     disconnect() {
         this.isIntentionallyClosed = true;
+        useMarketStore.getState().setConnected(false);
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;

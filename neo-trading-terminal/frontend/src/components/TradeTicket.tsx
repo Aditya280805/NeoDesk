@@ -44,27 +44,23 @@ export default function TradeTicket({
   const [notice, setNotice] = useState('')
   const retry = useRef<{ key: string; id: string } | null>(null)
   const [review, setReview] = useState<string | null>(null)
+  const lotSize = instrument.lot_size
+  const [previousDefaults, setPreviousDefaults] = useState({ initialSide, initialQuantity, derivative, lotSize })
 
-  const quantity = amount * (derivative ? instrument.lot_size : 1)
+  const quantityInputsChanged = !Object.is(initialQuantity, previousDefaults.initialQuantity)
+    || derivative !== previousDefaults.derivative || !Object.is(lotSize, previousDefaults.lotSize)
+  if (initialSide !== previousDefaults.initialSide || quantityInputsChanged) {
+    setPreviousDefaults({ initialSide, initialQuantity, derivative, lotSize })
+    if (initialSide && initialSide !== previousDefaults.initialSide) setSide(initialSide)
+    if (initialQuantity != null && quantityInputsChanged) setAmount(defaultAmount)
+    if (derivative !== previousDefaults.derivative) {
+      setProduct(derivative ? 'NRML' : 'CNC')
+    }
+  }
+
+  const quantity = amount * (derivative ? lotSize : 1)
   const value = quantity * (type === 'LIMIT' ? Number(price) : ltp ?? 0)
   const supported = ['EQUITY', 'ETF', 'OPTION', 'FUTURE'].includes(instrument.kind)
-
-  useEffect(() => {
-    if (initialSide) setSide(initialSide)
-  }, [initialSide])
-
-  useEffect(() => {
-    if (initialQuantity != null) {
-      const calculated = derivative && instrument.lot_size && initialQuantity >= instrument.lot_size
-        ? Math.max(1, Math.round(initialQuantity / instrument.lot_size))
-        : Math.max(1, Math.round(initialQuantity))
-      setAmount(calculated)
-    }
-  }, [initialQuantity, derivative, instrument.lot_size])
-
-  useEffect(() => {
-    setProduct(derivative ? 'NRML' : 'CNC')
-  }, [derivative])
 
   useEffect(() => {
     let active = true

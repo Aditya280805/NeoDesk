@@ -42,9 +42,10 @@ class Discovery:
         filtered.sort(key=lambda i:(i['expiry'],i.get('strike',0),i.get('option_type','')))
         return {'items':filtered[offset:offset+limit],'total':len(filtered),'expiries':expiries,'expiry':selected}
 
-    def activity(self, scope, metric):
+    def activity(self, scope, metric, user_id=1):
         stamp=self.store.metadata()['updated_at']
-        key=(scope,metric,self.market.source,stamp)
+        source=self.market.source if user_id==1 else self.market.get_session(user_id).source
+        key=(user_id,scope,metric,source,stamp)
         cached=self.activity_cache.get(key)
         if cached and time.monotonic()-cached[0]<60:
             return cached[1]
@@ -63,16 +64,16 @@ class Discovery:
             universe='Nearest-expiry futures for available indices'
         quotes={}
         error=None
-        if self.market.source=='kotak' and rows:
+        if source=='kotak' and rows:
             try:
-                quotes={q['id']:q for q in self.market.quotes([i['id'] for i in rows])}
+                quotes={q['id']:q for q in self.market.quotes([i['id'] for i in rows],user_id=user_id)}
             except Exception:
                 error='Activity data is temporarily unavailable.'
         field='volume' if metric=='volume' else 'turnover_estimate'
         ranked=[{**i,'quote':quotes[i['id']]} for i in rows if quotes.get(i['id'],{}).get(field) is not None]
         ranked.sort(key=lambda i:i['quote'][field],reverse=True)
         result={'items':ranked[:8],'featured':rows[:8], 'universe':universe,'tracked':len(rows),
-                'quoted':len(quotes),'metric':metric,'source':self.market.source,
+                'quoted':len(quotes),'metric':metric,'source':source,
                 'updated_at':datetime.now(IST).isoformat(),'error':error,
                 'note':'Ranks only this tracked universe. Traded value is estimated from broker volume × VWAP.'}
         self.activity_cache={key:(time.monotonic(),result),**{k:v for k,v in self.activity_cache.items() if time.monotonic()-v[0]<60 and k!=key}}

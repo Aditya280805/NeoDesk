@@ -10,6 +10,7 @@ def test_index_quote_uses_broker_name_and_preserves_catalogue_id(tmp_path):
     app=make_app(tmp_path)
     market=app.state.market
     market.source='kotak'
+    market.get_session(1).source='kotak'
     def quotes(strict):
         assert market.broker.config.kotak_instruments[0].instrument_token=='Nifty 50'
         return [{'exchange_segment':'nse_cm','instrument_token':'Nifty 50','ltp':23000,'change_pct':1,'source':'kotak'}]
@@ -23,7 +24,7 @@ def test_detail_groups_only_same_isin_and_retains_holdings(tmp_path):
     item=app.state.store.instrument('nse_cm|1333')
     app.state.store.save_catalogue([item|{'isin':'INE123'},item|{'id':'bse_cm|500','exchange':'bse_cm','token':'500','isin':'INE123'},item|{'id':'bse_cm|501','exchange':'bse_cm','token':'501','isin':'OTHER'}],['nse_cm','bse_cm'])
     with app.state.store.connect() as db:
-        db.execute('INSERT INTO positions VALUES (?,?,?)',(item['id'],10,10000))
+        db.execute('INSERT INTO positions (user_id, instrument_id, quantity, cost) VALUES (?,?,?,?)',(1,item['id'],10,10000))
     client=TestClient(app)
     r=client.get('/api/instrument-detail',params={'instrument_id':item['id']})
     assert r.status_code==200

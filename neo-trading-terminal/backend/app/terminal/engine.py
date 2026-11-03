@@ -8,7 +8,15 @@ from app.terminal.signals import Signal, IndicatorEvaluator
 logger = logging.getLogger(__name__)
 
 class StrategyEngine:
+    """
+    Core execution engine for automated trading strategies.
+    
+    Manages the lifecycle, evaluation, and execution of trading signals against 
+    paper strategies. Live algorithm execution is unavailable until its broker
+    acknowledgements and fills can be reconciled per account.
+    """
     def __init__(self, store, market, paper, risk_manager=None):
+        """Initialize the StrategyEngine with required dependencies."""
         self.store = store
         self.market = market
         self.paper = paper
@@ -36,7 +44,9 @@ class StrategyEngine:
                     50
                 )
                 
-                closes = self._fetch_history(instrument_id, history_depth)
+                if item.get('mode') != 'paper':
+                    continue
+                closes = self._fetch_history(instrument_id, history_depth, item.get('user_id',1))
                 evaluator = IndicatorEvaluator(
                     strategy_id=sid,
                     instrument_id=instrument_id,
@@ -47,10 +57,11 @@ class StrategyEngine:
                 self.strategies[sid] = {
                     **item,
                     'closes': closes,
-                    'last_eval': None
+                    'last_eval': None,
+                    'lock': asyncio.Lock()
                 }
                 self.evaluators[sid] = evaluator
-                self.store.watch(instrument_id)
+                self.store.watch(item.get('user_id',1),instrument_id)
         except Exception as e:
             logger.error(f"Error loading persisted strategies: {e}")
 
@@ -67,9 +78,9 @@ class StrategyEngine:
         except Exception:
             return ''
 
-    def _fetch_history(self, instrument_id: str, depth: int) -> List[float]:
+    def _fetch_history(self, instrument_id: str, depth: int, user_id: int=1) -> List[float]:
         try:
-            history = self.market.history(instrument_id, 'D', depth)
+            history = self.market.history(instrument_id, 'D', depth, user_id=user_id)
             return [float(c['close']) for c in history.get('candles', [])][-depth:]
         except Exception as e:
             logger.error(f"Failed to fetch history for {instrument_id}: {e}")
@@ -84,8 +95,11 @@ class StrategyEngine:
         mode: str = 'paper',
         name: Optional[str] = None,
         fast: Optional[int] = None,
-        slow: Optional[int] = None
+        slow: Optional[int] = None,
+        user_id: int = 1
     ) -> str:
+        if mode != 'paper':
+            raise ValueError('Automated live strategies are unavailable. Use a reviewed manual Kotak order.')
         params = params or {}
         if fast is not None and 'fast' not in params:
             params['fast'] = fast
@@ -101,10 +115,11 @@ class StrategyEngine:
             int(params.get('period', 14)) + 10,
             50
         )
-        closes = self._fetch_history(instrument_id, depth)
+        closes = self._fetch_history(instrument_id, depth, user_id)
 
         strat_data = {
             'id': sid,
+            'user_id': user_id,
             'name': strat_name,
             'strategy_type': strategy_type,
             'instrument_id': instrument_id,
@@ -121,7 +136,7 @@ class StrategyEngine:
         }
 
         # Persist to SQLite
-        self.store.save_strategy(strat_data)
+        self.store.save_strategy(strat_data, user_id=user_id)
 
         evaluator = IndicatorEvaluator(
             strategy_id=sid,
@@ -134,22 +149,28 @@ class StrategyEngine:
             **strat_data,
             'closes': closes,
             'entry_cost': 0.0,
-            'last_eval': None
+            'last_eval': None,
+            'lock': asyncio.Lock()
         }
         self.evaluators[sid] = evaluator
 
         # Ensure the instrument is watched for WebSocket/polling stream
         try:
-            self.store.watch(instrument_id)
+            self.store.watch(user_id, instrument_id)
         except Exception:
             pass
 
         return sid
 
-    def stop(self, sid: str):
+    def stop(self, sid: str, user_id: Optional[int] = None):
+        if sid not in self.strategies:
+            self._update_saved_status(sid,user_id,'STOPPED')
+            return
         if sid in self.strategies:
-            self.strategies[sid]['status'] = 'STOPPED'
             strat = self.strategies[sid]
+            if user_id is not None and strat.get('user_id', 1) != user_id:
+                raise ValueError("Unauthorized access to strategy")
+            strat['status'] = 'STOPPED'
             self.store.update_strategy_state(
                 sid=sid,
                 cash=strat['cash'],
@@ -159,10 +180,15 @@ class StrategyEngine:
                 status='STOPPED'
             )
 
-    def pause(self, sid: str):
+    def pause(self, sid: str, user_id: Optional[int] = None):
+        if sid not in self.strategies:
+            self._update_saved_status(sid,user_id,'PAUSED')
+            return
         if sid in self.strategies:
-            self.strategies[sid]['status'] = 'PAUSED'
             strat = self.strategies[sid]
+            if user_id is not None and strat.get('user_id', 1) != user_id:
+                raise ValueError("Unauthorized access to strategy")
+            strat['status'] = 'PAUSED'
             self.store.update_strategy_state(
                 sid=sid,
                 cash=strat['cash'],
@@ -172,10 +198,20 @@ class StrategyEngine:
                 status='PAUSED'
             )
 
-    def resume(self, sid: str):
+    def _update_saved_status(self,sid,user_id,status):
+        saved=self.store.get_strategy(sid)
+        if not saved:
+            raise ValueError('Strategy not found')
+        if user_id is not None and saved['user_id']!=user_id:
+            raise ValueError('Unauthorized access to strategy')
+        self.store.update_strategy_state(sid,saved['cash'],saved['held'],status=status)
+
+    def resume(self, sid: str, user_id: Optional[int] = None):
         if sid in self.strategies:
-            self.strategies[sid]['status'] = 'RUNNING'
             strat = self.strategies[sid]
+            if user_id is not None and strat.get('user_id', 1) != user_id:
+                raise ValueError("Unauthorized access to strategy")
+            strat['status'] = 'RUNNING'
             self.store.update_strategy_state(
                 sid=sid,
                 cash=strat['cash'],
@@ -185,21 +221,24 @@ class StrategyEngine:
                 status='RUNNING'
             )
 
-    def remove(self, sid: str):
+    def remove(self, sid: str, user_id: Optional[int] = None):
         if sid in self.strategies:
-            self.stop(sid)
+            self.stop(sid, user_id=user_id)
             del self.strategies[sid]
         if sid in self.evaluators:
             del self.evaluators[sid]
 
-    def get_strategy(self, sid: str) -> Optional[Dict[str, Any]]:
+    def get_strategy(self, sid: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         if sid in self.strategies:
-            return dict(self.strategies[sid])
-        return self.store.get_strategy(sid)
+            strat = dict(self.strategies[sid])
+            if user_id is not None and strat.get('user_id', 1) != user_id:
+                return None
+            return strat
+        return self.store.get_strategy(sid, user_id)
 
-    def list_active(self) -> List[Dict[str, Any]]:
+    def list_active(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # Sync with database records to return clean serializable format
-        db_strats = self.store.list_strategies()
+        db_strats = self.store.list_strategies(user_id=user_id)
         # Merge latest in-memory cash/held states
         for s in db_strats:
             sid = s['id']
@@ -212,6 +251,7 @@ class StrategyEngine:
                 s['status'] = mem['status']
         return db_strats
 
+
     async def on_tick(self, token: str, ltp: float):
         token_str = str(token)
         for sid, strat in list(self.strategies.items()):
@@ -222,77 +262,85 @@ class StrategyEngine:
             if strat_token and strat_token != token_str:
                 continue
 
-            strat['last_eval'] = time.time()
-            evaluator = self.evaluators.get(sid)
-            if not evaluator:
-                continue
+            if 'lock' not in strat:
+                strat['lock'] = asyncio.Lock()
 
-            closes = strat.get('closes', [])
-            signal: Optional[Signal] = evaluator.evaluate(closes, ltp)
-
-            if signal:
-                # 1. Record signal in DB
-                try:
-                    self.store.record_signal(signal)
-                except Exception as e:
-                    logger.error(f"Failed to record signal: {e}")
-
-                # 2. Broadcast signal over WebSocket
-                try:
-                    from app.websocket.manager import manager
-                    await manager.broadcast({"type": "SIGNAL", "data": signal.to_dict()})
-                except Exception as e:
-                    logger.error(f"Failed to broadcast signal: {e}")
-
-                # 3. Execute order if actionable
-                try:
-                    instrument = self.store.instrument(strat['instrument_id'])
-                except Exception as e:
-                    logger.error(f"Failed to lookup instrument for strategy {sid}: {e}")
+            async with strat['lock']:
+                if strat['status'] != 'RUNNING':
                     continue
 
-                if signal.action == 'BUY' and strat['held'] == 0:
-                    qty = int(strat['cash'] / ltp)
-                    if qty > 0:
-                        cost = qty * ltp
-                        success = await self._execute_order(strat, instrument, 'BUY', qty, ltp)
+                strat['last_eval'] = time.time()
+                evaluator = self.evaluators.get(sid)
+                if not evaluator:
+                    continue
+
+                closes = strat.get('closes', [])
+                signal: Optional[Signal] = evaluator.evaluate(closes, ltp)
+
+                if signal:
+                    # 1. Record signal in DB
+                    try:
+                        self.store.record_signal(strat.get('user_id', 1), signal)
+                    except Exception as e:
+                        logger.error(f"Failed to record signal: {e}")
+
+
+                    # 2. Broadcast signal over WebSocket
+                    try:
+                        from app.websocket.manager import manager
+                        await manager.broadcast({"type": "SIGNAL", "data": signal.to_dict(), "user_id":strat.get('user_id',1)})
+                    except Exception as e:
+                        logger.error(f"Failed to broadcast signal: {e}")
+
+                    # 3. Execute order if actionable
+                    try:
+                        instrument = self.store.instrument(strat['instrument_id'])
+                    except Exception as e:
+                        logger.error(f"Failed to lookup instrument for strategy {sid}: {e}")
+                        continue
+
+                    if signal.action == 'BUY' and strat['held'] == 0:
+                        qty = int(strat['cash'] / ltp)
+                        if qty > 0:
+                            cost = qty * ltp
+                            success = await self._execute_order(strat, instrument, 'BUY', qty, ltp)
+                            if success:
+                                strat['held'] = qty
+                                strat['entry_cost'] = cost
+                                strat['cash'] -= cost
+                                strat['total_trades'] = strat.get('total_trades', 0) + 1
+                                self.store.update_strategy_state(
+                                    sid, 
+                                    cash=strat['cash'], 
+                                    held=strat['held'], 
+                                    realized_pnl=strat.get('realized_pnl', 0.0), 
+                                    total_trades=strat['total_trades']
+                                )
+
+                    elif signal.action == 'SELL' and strat['held'] > 0:
+                        qty = strat['held']
+                        proceeds = qty * ltp
+                        entry_cost = strat.get('entry_cost', proceeds)
+                        pnl = proceeds - entry_cost
+                        success = await self._execute_order(strat, instrument, 'SELL', qty, ltp)
                         if success:
-                            strat['held'] = qty
-                            strat['entry_cost'] = cost
-                            strat['cash'] -= cost
+                            strat['realized_pnl'] = strat.get('realized_pnl', 0.0) + pnl
+                            strat['cash'] += proceeds
+                            strat['held'] = 0
                             strat['total_trades'] = strat.get('total_trades', 0) + 1
                             self.store.update_strategy_state(
                                 sid, 
                                 cash=strat['cash'], 
                                 held=strat['held'], 
-                                realized_pnl=strat.get('realized_pnl', 0.0), 
+                                realized_pnl=strat['realized_pnl'], 
                                 total_trades=strat['total_trades']
                             )
-
-                elif signal.action == 'SELL' and strat['held'] > 0:
-                    qty = strat['held']
-                    proceeds = qty * ltp
-                    entry_cost = strat.get('entry_cost', proceeds)
-                    pnl = proceeds - entry_cost
-                    success = await self._execute_order(strat, instrument, 'SELL', qty, ltp)
-                    if success:
-                        strat['realized_pnl'] = strat.get('realized_pnl', 0.0) + pnl
-                        strat['cash'] += proceeds
-                        strat['held'] = 0
-                        strat['total_trades'] = strat.get('total_trades', 0) + 1
-                        self.store.update_strategy_state(
-                            sid, 
-                            cash=strat['cash'], 
-                            held=strat['held'], 
-                            realized_pnl=strat['realized_pnl'], 
-                            total_trades=strat['total_trades']
-                        )
 
     async def _execute_order(self, strat: dict, instrument: dict, side: str, quantity: int, price: float) -> bool:
         logger.info(f"Strategy {strat['id']} executing {side} {quantity} {instrument['symbol']} @ {price} in {strat['mode']} mode")
         
         if strat['mode'] == 'paper':
-            quote = {'id': strat['instrument_id'], 'ltp': price, 'close': price, 'source': getattr(self.market, 'source', 'demo')}
+            quote = {'id': strat['instrument_id'], 'ltp': price, 'close': price, 'source': self.market.get_session(strat.get('user_id',1)).source}
             self.paper.submit(
                 instrument=instrument,
                 side=side,
@@ -300,55 +348,9 @@ class StrategyEngine:
                 order_type='MARKET',
                 price=None,
                 request_id=str(uuid.uuid4()),
-                quote=quote
+                quote=quote,
+                user_id=strat.get('user_id', 1)
             )
+
             return True
-        elif strat['mode'] == 'live':
-            try:
-                if self.risk_manager:
-                    try:
-                        self.risk_manager.validate_order(
-                            instrument=instrument['symbol'],
-                            side=side,
-                            quantity=quantity,
-                            price=price,
-                            ltp=price
-                        )
-                    except Exception as risk_e:
-                        logger.warning(f"Strategy {strat['id']} order rejected by RiskManager: {risk_e}")
-                        from app.websocket.manager import manager
-                        asyncio.create_task(manager.broadcast({"type": "RISK_ALERT", "data": {"strategy_id": strat['id'], "message": str(risk_e)}}))
-                        self.store.audit('strategy_live_order_rejected', f"Strategy {strat['id']} order rejected: {risk_e}")
-                        return False
-                
-                # Place actual live order
-                exch_seg = instrument.get('exchange', 'nse_cm')
-                neo_symbol = instrument.get('neo_symbol', instrument.get('symbol'))
-                tx_type = 'B' if side == 'BUY' else 'S'
-                
-                res = self.market.broker.client.place_order(
-                    exchange_segment=exch_seg,
-                    product='MIS',
-                    price="0", # Market order for now
-                    order_type='MKT',
-                    quantity=str(quantity),
-                    validity="DAY",
-                    trading_symbol=neo_symbol,
-                    transaction_type=tx_type
-                )
-                logger.info(f"Live order placed for {strat['id']}: {res}")
-                
-                # We need to record this in the orders table
-                n_ord_no = res.get('nOrdNo', str(uuid.uuid4())) if isinstance(res, dict) else str(uuid.uuid4())
-                req_id = str(uuid.uuid4())
-                with self.store.connect() as db:
-                    db.execute('''
-                        INSERT INTO orders (id, request_id, instrument_id, side, quantity, order_type, status, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ''', (n_ord_no, req_id, strat['instrument_id'], side, quantity, 'MARKET', 'SUBMITTED'))
-                return True
-            except Exception as e:
-                logger.error(f"Failed to place live order for strategy {strat['id']}: {e}")
-                self.store.audit('strategy_live_order_failed', f"Strategy {strat['id']} order failed: {e}")
-                return False
         return False

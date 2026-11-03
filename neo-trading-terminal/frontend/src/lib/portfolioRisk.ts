@@ -1,0 +1,12 @@
+import type { PortfolioSnapshot } from './portfolioEvidence'
+export type RiskPolicySettings = { schema_version: 'portfolio-risk-policy.v1'; concentration_enabled: boolean; expiry_enabled: boolean; margin_enabled: boolean; loss_enabled: boolean; concentration_max_percent: string | null; expiry_window_days: number | null; margin_max_percent: string | null; loss_max_amount: string | null; loss_basis: 'broker_account_net_pnl' | null; loss_period: 'broker_trading_day' | null; max_observation_age_seconds: number | null }
+export type RiskPolicy = RiskPolicySettings & {revision: number}
+export type PolicyResponse = {policy: RiskPolicy; supported_inputs: {margin: boolean; loss: boolean}}
+export type RiskFinding = {code: string; enabled: boolean; outcome: 'pass' | 'breach' | 'cannot_assess'; measured: string | null; limit: string | null; unit: string | null; numerator: string | null; denominator: string | null; affected_row_ids: string[]; reason_codes: string[]}
+export type RiskReport = {schema_version: 'portfolio-risk.v1'; report_id: string; evidence_id: string; policy_revision: number; calculation_version: string; evaluated_at: string; summary: 'pass' | 'breach' | 'cannot_assess'; coverage: {passed: number; breached: number; cannot_assess: number; disabled: number}; findings: RiskFinding[]; observation_times: Record<string,{retrieval_started_at: string | null; retrieval_finished_at: string | null; source_timestamp: string | null}>; limitations: string[]}
+export type PortfolioRiskEnvelope = PortfolioSnapshot & {risk_report?: RiskReport}
+export function optionalDecimal(value: string): string | null { if(value === '') return null; if(!/^\d+(\.\d{1,8})?$/.test(value) || value.replace('.','').length > 24) throw new Error('Use a nonnegative decimal with at most 24 digits and 8 decimal places.'); return value }
+export function reportLabel(report: Pick<RiskReport,'summary'|'coverage'>) { return report.coverage.disabled === 4 ? 'Cannot assess · all checks disabled' : {pass:'Pass',breach:'Breach',cannot_assess:'Cannot assess'}[report.summary] }
+export function olderPolicy(report: Pick<RiskReport,'policy_revision'> | undefined, revision?: number) {return !!report && revision !== undefined && report.policy_revision < revision}
+export function policyConflict<T>(state:T) {return {...state,conflict:true}}
+export function canPublish(captured:number,current:number,active:boolean) {return active && captured===current}

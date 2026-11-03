@@ -3,17 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "test": "node --test tests/*.test.cjs",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint src"
   },
   "dependencies": {
     "autoprefixer": "^10.4.17",
-    "axios": "^1.6.7",
     "lightweight-charts": "5.2.1",
     "lucide-react": "^1.49.0",
-    "next": "^16.3.8",
+    "next": "16.4.1",
     "next-themes": "^0.4.6",
     "postcss": "^8.4.35",
     "react": "^19.3.0",
@@ -26,7 +26,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.39.1",
-    "eslint-config-next": "^16.3.8",
+    "eslint-config-next": "16.4.1",
     "typescript": "^5.9.3"
   }
 }

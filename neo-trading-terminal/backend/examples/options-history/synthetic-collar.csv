@@ -1,0 +1,13 @@
+adjustment_id,ask,ask_quantity,bid,bid_quantity,contract_id,currency,deliverable_quantity,effective_at,exchange,expiry,kind,known_at,lot_size,price,record_id,row_type,settlement_rule,source,strike,timestamp,underlying_id,verified
+original,,,,,S,INR,1,2026-01-01T09:00:00+05:30,NSE,,equity,2026-01-01T09:00:00+05:30,10,,contract-S,contract,physical-european.1,synthetic-test,,2026-01-01T09:00:00+05:30,S,
+,100,10,99,10,S,,,2026-01-01T09:00:00+05:30,,,,2026-01-01T09:00:00+05:30,,,q-S-0,quote,,synthetic-test,,2026-01-01T09:00:00+05:30,,
+,100,10,99,10,S,,,2026-01-01T09:01:00+05:30,,,,2026-01-01T09:01:00+05:30,,,q-S-1,quote,,synthetic-test,,2026-01-01T09:01:00+05:30,,
+original,,,,,C,INR,1,2026-01-01T09:00:00+05:30,NSE,2026-01-29,call,2026-01-01T09:00:00+05:30,10,,contract-C,contract,physical-european.1,synthetic-test,110,2026-01-01T09:00:00+05:30,S,
+,6,10,5,10,C,,,2026-01-01T09:00:00+05:30,,,,2026-01-01T09:00:00+05:30,,,q-C-0,quote,,synthetic-test,,2026-01-01T09:00:00+05:30,,
+,6,10,5,10,C,,,2026-01-01T09:01:00+05:30,,,,2026-01-01T09:01:00+05:30,,,q-C-1,quote,,synthetic-test,,2026-01-01T09:01:00+05:30,,
+,,,,,C,,,2026-01-29T15:30:00+05:30,,,,2026-01-29T15:30:00+05:30,,120,expiry-C,settlement,physical-european.1,synthetic-test,,2026-01-29T15:30:00+05:30,,true
+original,,,,,P,INR,1,2026-01-01T09:00:00+05:30,NSE,2026-01-29,put,2026-01-01T09:00:00+05:30,10,,contract-P,contract,physical-european.1,synthetic-test,90,2026-01-01T09:00:00+05:30,S,
+,3,10,2,10,P,,,2026-01-01T09:00:00+05:30,,,,2026-01-01T09:00:00+05:30,,,q-P-0,quote,,synthetic-test,,2026-01-01T09:00:00+05:30,,
+,3,10,2,10,P,,,2026-01-01T09:01:00+05:30,,,,2026-01-01T09:01:00+05:30,,,q-P-1,quote,,synthetic-test,,2026-01-01T09:01:00+05:30,,
+,,,,,P,,,2026-01-29T15:30:00+05:30,,,,2026-01-29T15:30:00+05:30,,120,expiry-P,settlement,physical-european.1,synthetic-test,,2026-01-29T15:30:00+05:30,,true
+,120,10,120,10,S,,,2026-01-29T15:30:00+05:30,,,,2026-01-29T15:30:00+05:30,,,end-S,quote,,synthetic-test,,2026-01-29T15:30:00+05:30,,
