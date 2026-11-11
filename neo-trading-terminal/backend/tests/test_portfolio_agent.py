@@ -13,7 +13,9 @@ from pydantic import SecretStr
 from app.auth.router import _clear_rate_limits
 from app.core.config import Settings
 from app.terminal import options_agent as module
-from app.terminal.agent_scope import PortfolioChatRequest, PortfolioAnswer, make_scope
+from app.terminal.agent_registry import AGENT_REGISTRY
+from app.terminal.agent_scope import PortfolioChatRequest, specialist_scope
+from app.terminal import specialist_agents
 from app.terminal.server import create_app
 
 @pytest.fixture
@@ -32,8 +34,10 @@ def app(tmp_path, monkeypatch):
     app.state.market.get_session(1).source = 'kotak'
     def build(config, snapshot, tools, **kwargs):
         return SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={
-            'answer':'Funds evidence is available; exchange freshness is unknown.', 'evidence_ids':[snapshot['evidence_id']], 'risk_report_ids':[snapshot['risk_report']['report_id']]})))
-    monkeypatch.setattr(module, 'build_agent', Mock(side_effect=build))
+            'answer':'Funds evidence is available; exchange freshness is unknown.', 'evidence_ids':[snapshot['evidence_id']]})))
+    mock_portfolio = Mock(side_effect=build)
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', mock_portfolio)
+    app.state.mock_portfolio_agent = mock_portfolio
     return app
 
 @pytest.fixture
@@ -42,24 +46,28 @@ def client(app):
         assert client.post('/api/auth/register', json={'email':'portfolio@example.com','password':'test-password-123','display_name':'Portfolio'}).status_code == 200
         yield client
 
-def test_portfolio_contract():
-    assert make_scope('portfolio', None).stored_context == {'schema_version':'portfolio.v1','scope':'portfolio'}
+def test_specialist_portfolio_contract():
+    assert specialist_scope('portfolio', None).stored_context == {'scope': 'portfolio', 'agent_id': 'portfolio_analysis', 'contract_version': 'analysis.1'}
 
 def test_portfolio_authenticated_snapshot_chat_history(client, app):
     assert client.post('/api/options-agent/portfolio/snapshot',json={'underlying':'NIFTY'}).status_code == 422
     assert client.post('/api/options-agent/portfolio/snapshot').status_code == 200
+    with app.state.store.connect() as db:
+        detail = json.loads(db.execute("SELECT detail FROM option_agent_runs WHERE kind='snapshot' ORDER BY created_at DESC LIMIT 1").fetchone()[0])
+    assert detail['prompt_version'] == 'snapshot.portfolio.1'
     reply = client.post('/api/options-agent/portfolio/chat', json={'message':'Summarize'})
     assert reply.status_code == 200, reply.text
     body = reply.json()
     assert body['evidence_ids'] == [body['portfolio_snapshot']['evidence_id']]
     assert body['read_only'] is True and 'snapshot_ids' not in body
+    assert body['agent_id'] == 'portfolio_analysis'
     assert app.state.chain_fetch.call_count == 0
     history = client.get('/api/options-agent/conversations/'+body['conversation_id']).json()
-    assert history['context'] == {'schema_version':'portfolio.v1','scope':'portfolio'}
+    assert history['context'] == {'scope': 'portfolio', 'agent_id': 'portfolio_analysis', 'contract_version': 'analysis.1'}
     assert history['turns'][0]['portfolio_snapshot'] == body['portfolio_snapshot']
     assert 'snapshot' not in history['turns'][0]
     record = client.get('/api/options-agent/runs/'+body['run_id']).json()['detail']
-    assert record['scope'] == 'portfolio' and record['schema_version'] == 'portfolio.v1'
+    assert record['scope'] == 'portfolio' and record['agent_id'] == 'portfolio_analysis'
     assert record['evidence_id'] == body['evidence_ids'][0]
     assert client.post('/api/options-agent/chat', json={'message':'reuse','conversation_id':body['conversation_id']}).status_code == 409
     assert client.post('/api/auth/register', json={'email':'other@example.com','password':'test-password-123','display_name':'Other'}).status_code == 200
@@ -77,22 +85,22 @@ def test_portfolio_authentication(app):
         assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code == 401
 
 @pytest.mark.parametrize('content', [{}, {'answer':'ok'}, {'answer':'ok','evidence_ids':[]}, {'answer':'ok','evidence_ids':[str(uuid4())]}, {'answer':'','evidence_ids':[str(uuid4())]}, {'answer':'ok','snapshot_ids':[str(uuid4())]}])
-def test_bad_evidence_never_persisted(client,app,content):
-    module.build_agent.side_effect=lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content=content)))
+def test_bad_evidence_never_persisted(client,app,content,monkeypatch):
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content=content))))
     assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code == 503
     with app.state.store.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM option_chat_turns').fetchone()[0] == 0
 
-def test_incomplete_run_rejected(client,app):
+def test_incomplete_run_rejected(client,app,monkeypatch):
     from agno.run.base import RunStatus
-    module.build_agent.side_effect=lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(status=RunStatus.error,content={})))
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(status=RunStatus.error,content={}))))
     assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code == 503
 
-def test_generation_rechecked_after_model(client,app):
+def test_generation_rechecked_after_model(client,app,monkeypatch):
     async def changed():
         app.state.market.get_session(1).generation = str(uuid4())
         return SimpleNamespace(content={'answer':'ok','evidence_ids':[str(uuid4())]})
-    module.build_agent.side_effect=lambda *a,**kw:SimpleNamespace(arun=changed)
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', lambda *a,**kw:SimpleNamespace(arun=changed))
     assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code == 503
     with app.state.store.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM option_chat_turns').fetchone()[0] == 0
@@ -126,11 +134,11 @@ def test_context_oversize_blocks_model(client,app,monkeypatch):
         return original(method,user_id,**kwargs)
     app.state.market.call.side_effect=large_orders
     assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code == 503
-    module.build_agent.assert_not_called()
+    app.state.mock_portfolio_agent.assert_not_called()
     with app.state.store.connect() as db:
-        assert json.loads(db.execute('SELECT detail FROM option_agent_runs').fetchone()[0])['failure_reason'] == 'context_limit'
+        assert json.loads(db.execute('SELECT detail FROM option_agent_runs').fetchone()[0])['failure_reason'] in ('context_limit', 'context_budget')
 
-def test_oldest_history_trimmed_and_section_states_preserved(client,app):
+def test_oldest_history_trimmed_and_section_states_preserved(client,app,monkeypatch):
     first=client.post('/api/options-agent/portfolio/chat',json={'message':'first'}).json()
     with app.state.store.connect() as db:
         for i in range(4):
@@ -140,9 +148,9 @@ def test_oldest_history_trimmed_and_section_states_preserved(client,app):
     def capture(config,snapshot,tools,**kw):
         async def run(prompt):
             prompts.append(prompt)
-            return SimpleNamespace(content={'answer':'ok','evidence_ids':[snapshot['evidence_id']], 'risk_report_ids':[snapshot['risk_report']['report_id']]})
+            return SimpleNamespace(content={'answer':'ok','evidence_ids':[snapshot['evidence_id']]})
         return SimpleNamespace(arun=run)
-    module.build_agent.side_effect=capture
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', capture)
     assert client.post('/api/options-agent/portfolio/chat',json={'message':'next','conversation_id':first['conversation_id']}).status_code == 200
     prompt=json.loads(prompts[0]); assert len(prompts[0].encode())<=65536
     assert len(prompt['previous_conversation'])<4
@@ -156,10 +164,7 @@ def test_oldest_history_trimmed_and_section_states_preserved(client,app):
 
 @pytest.mark.parametrize('provider',['gemini','openai'])
 def test_real_provider_serialization_portfolio(client,app,monkeypatch,provider):
-    from app.terminal.agent_scope import PORTFOLIO_INSTRUCTIONS
-    from app.terminal.options_agent import build_agent
-    # Undo only the fixture's build_agent replacement: the SDK and Agno run for real.
-    monkeypatch.setattr(module,'build_agent',build_agent.__wrapped__ if hasattr(build_agent,'__wrapped__') else REAL_BUILD_AGENT)
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_analysis', specialist_agents.build_portfolio_analysis_agent)
     original=app.state.market.call.side_effect
     def provider_data(method,user_id,**kwargs):
         return {'data':[{'trdSym':'provider-untrusted','qty':'1'}]} if method=='order_report' else original(method,user_id,**kwargs)
@@ -170,24 +175,23 @@ def test_real_provider_serialization_portfolio(client,app,monkeypatch,provider):
             payload=json.loads(request.content); calls.append(payload)
             if provider=='gemini':
                 declarations=payload['tools'][0]['functionDeclarations']
-                assert [d['name'] for d in declarations]==['get_portfolio_snapshot']
+                assert [d['name'] for d in declarations]==['get_portfolio_analysis_snapshot']
                 assert 'evidence_ids' in payload['generationConfig']['responseSchema']['properties']
                 assert 'previous-untrusted' not in str(payload.get('systemInstruction',{}))
                 assert 'provider-untrusted' not in str(payload.get('systemInstruction',{}))
                 assert 'provider-untrusted' in str(payload['contents'])
                 if len(calls)==1:
-                    parts=[{'functionCall':{'name':'get_portfolio_snapshot','args':{},'id':'portfolio-call'},'thoughtSignature':'Zml4dHVyZQ=='}]
+                    parts=[{'functionCall':{'name':'get_portfolio_analysis_snapshot','args':{},'id':'portfolio-call'},'thoughtSignature':'Zml4dHVyZQ=='}]
                 else:
                     responses=[p['functionResponse'] for c in payload['contents'] for p in c['parts'] if 'functionResponse' in p]
-                    assert responses[0]['name']=='get_portfolio_snapshot'
+                    assert responses[0]['name']=='get_portfolio_analysis_snapshot'
                     text=next(p['text'] for c in payload['contents'] for p in c['parts'] if 'text' in p and 'current_portfolio_snapshot' in p['text'])
                     evidence=json.loads(text)['current_portfolio_snapshot']['evidence_id']
-                    report_id=json.loads(text)['current_portfolio_snapshot']['risk_report']['report_id']
                     assert evidence in str(responses)
-                    parts=[{'text':json.dumps({'answer':'Read-only portfolio evidence.','evidence_ids':[evidence], 'risk_report_ids':[report_id]})}]
+                    parts=[{'text':json.dumps({'answer':'Read-only portfolio evidence.','evidence_ids':[evidence]})}]
                 return httpx.Response(200,json={'candidates':[{'content':{'role':'model','parts':parts},'finishReason':'STOP'}],
                     'usageMetadata':{'promptTokenCount':100,'candidatesTokenCount':40,'thoughtsTokenCount':60,'totalTokenCount':200}})
-            assert [t['function']['name'] for t in payload['tools']]==['get_portfolio_snapshot']
+            assert [t['function']['name'] for t in payload['tools']]==['get_portfolio_analysis_snapshot']
             assert payload['max_completion_tokens']==900
             assert 'evidence_ids' in payload['response_format']['json_schema']['schema']['properties']
             privileged=[m for m in payload['messages'] if m['role'] in ('system','developer')]
@@ -196,9 +200,8 @@ def test_real_provider_serialization_portfolio(client,app,monkeypatch,provider):
             assert 'provider-untrusted' in str(payload['messages'])
             message=next(m['content'] for m in payload['messages'] if m['role']=='user' and 'current_portfolio_snapshot' in m['content'])
             evidence=json.loads(message)['current_portfolio_snapshot']['evidence_id']
-            report_id=json.loads(message)['current_portfolio_snapshot']['risk_report']['report_id']
             return httpx.Response(200,json={'id':'fixture','object':'chat.completion','created':1,'model':'gpt-4.1-mini',
-                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'answer':'Read-only portfolio evidence.','evidence_ids':[evidence], 'risk_report_ids':[report_id]})},'finish_reason':'stop'}],
+                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'answer':'Read-only portfolio evidence.','evidence_ids':[evidence]})},'finish_reason':'stop'}],
                 'usage':{'prompt_tokens':100,'completion_tokens':40,'total_tokens':140}})
         except Exception as e:
             errors.append(repr(e)); raise
@@ -220,7 +223,7 @@ def test_real_provider_serialization_portfolio(client,app,monkeypatch,provider):
         asyncio.run(sdk.aio.aclose());sdk.close()
     else: asyncio.run(sdk.close())
 
-REAL_BUILD_AGENT=module.build_agent
+REAL_PORTFOLIO_FACTORY=specialist_agents.build_portfolio_analysis_agent
 
 
 
@@ -240,8 +243,8 @@ def test_generation_rechecked_immediately_before_persistence(client,app,monkeypa
 
 
 def test_scope_instructions_are_static_and_enforce_read_only():
-    instructions=' '.join(make_scope('portfolio',None).instructions)
-    for term in ('unavailable', 'empty', 'zero', 'trades', 'strategy', 'freshness', 'untrusted'):
+    instructions=' '.join(specialist_scope('portfolio',None).instructions)
+    for term in ('unavailable', 'zero', 'orders', 'freshness', 'untrusted'):
         assert term in instructions
     assert 'previous-untrusted' not in instructions
 
@@ -353,7 +356,7 @@ def test_final_review_cancelled_persistence_rolls_back(app,monkeypatch,blocked_a
     @asynccontextmanager
     async def connection(*args,**kwargs):
         agent.mcp.capabilities['fixture']=SimpleNamespace(calls=1)
-        yield SimpleNamespace(token='fixture',tools=None,portfolio_snapshot=AsyncMock(return_value=snapshot))
+        yield SimpleNamespace(token='fixture',tools=None,portfolio_snapshot=AsyncMock(return_value=snapshot),_snapshot=AsyncMock(return_value=snapshot))
     monkeypatch.setattr(agent.mcp,'connection',connection)
     monkeypatch.setattr(agent,'status',lambda:{'configured':True})
     async def scenario():

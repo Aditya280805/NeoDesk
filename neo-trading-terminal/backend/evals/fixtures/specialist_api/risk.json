@@ -1,0 +1,130 @@
+{
+  "agent_id": "portfolio_risk",
+  "endpoint": "/api/options-agent/portfolio/risk/chat",
+  "method": "POST",
+  "request": {
+    "message": "Check portfolio risk limits, margin headroom, and concentration rules."
+  },
+  "response": {
+    "agent_id": "portfolio_risk",
+    "answer": "Portfolio risk checks pass: concentration, expiry, margin, and daily loss limits are within policy parameters.",
+    "conversation_id": "52acd0ba-f61f-409c-a0bc-5ae790377fa1",
+    "created_at": "2026-11-11T10:34:12.085952+00:00",
+    "evidence_ids": [
+      "21feaf25-efc3-44d3-bb0e-3dd909c87f33"
+    ],
+    "parent_run_id": "7f29ba07-6b0e-4912-b9b2-25e53977e085",
+    "read_only": true,
+    "risk_report_ids": [
+      "51125510-f68d-4168-88cc-6611509707b0"
+    ],
+    "risk_snapshot": {
+      "evidence_id": "21feaf25-efc3-44d3-bb0e-3dd909c87f33",
+      "risk_report": {
+        "calculation_version": "portfolio-risk.1",
+        "coverage": {
+          "breached": 0,
+          "cannot_assess": 4,
+          "disabled": 0,
+          "passed": 0
+        },
+        "evaluated_at": "2026-11-11T10:34:12.078542Z",
+        "evidence_id": "21feaf25-efc3-44d3-bb0e-3dd909c87f33",
+        "findings": [
+          {
+            "affected_row_ids": [],
+            "code": "concentration",
+            "denominator": null,
+            "enabled": true,
+            "limit": null,
+            "measured": null,
+            "numerator": null,
+            "outcome": "cannot_assess",
+            "reason_codes": [
+              "limit_not_configured"
+            ],
+            "scope": null,
+            "unit": "percent"
+          },
+          {
+            "affected_row_ids": [],
+            "code": "expiry",
+            "denominator": null,
+            "enabled": true,
+            "limit": null,
+            "measured": null,
+            "numerator": null,
+            "outcome": "cannot_assess",
+            "reason_codes": [
+              "limit_not_configured"
+            ],
+            "scope": null,
+            "unit": "days"
+          },
+          {
+            "affected_row_ids": [],
+            "code": "margin",
+            "denominator": null,
+            "enabled": true,
+            "limit": null,
+            "measured": null,
+            "numerator": null,
+            "outcome": "cannot_assess",
+            "reason_codes": [
+              "limit_not_configured"
+            ],
+            "scope": null,
+            "unit": "percent"
+          },
+          {
+            "affected_row_ids": [],
+            "code": "loss",
+            "denominator": null,
+            "enabled": true,
+            "limit": null,
+            "measured": null,
+            "numerator": null,
+            "outcome": "cannot_assess",
+            "reason_codes": [
+              "limit_not_configured"
+            ],
+            "scope": null,
+            "unit": "INR"
+          }
+        ],
+        "limitations": [
+          "limit_not_configured"
+        ],
+        "observation_times": {
+          "funds": {
+            "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+            "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+            "source_timestamp": null
+          },
+          "holdings": {
+            "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+            "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+            "source_timestamp": null
+          },
+          "orders": {
+            "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+            "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+            "source_timestamp": null
+          },
+          "positions": {
+            "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+            "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+            "source_timestamp": null
+          }
+        },
+        "policy_revision": 0,
+        "report_id": "51125510-f68d-4168-88cc-6611509707b0",
+        "schema_version": "portfolio-risk.v1",
+        "summary": "cannot_assess"
+      }
+    },
+    "run_id": "7f29ba07-6b0e-4912-b9b2-25e53977e085"
+  },
+  "scope": "risk",
+  "status_code": 200
+}

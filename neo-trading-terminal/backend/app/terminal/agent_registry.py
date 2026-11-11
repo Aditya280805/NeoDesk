@@ -10,8 +10,9 @@ capability tokens and token budgets are never shared.
 from typing import Callable
 
 from agno.agent import Agent
+from agno.team import Team
 
-AGENT_REGISTRY: dict[str, Callable[..., Agent]] = {}
+AGENT_REGISTRY: dict[str, Callable[..., Agent | Team]] = {}
 
 
 def register_agent(name: str):
@@ -25,9 +26,9 @@ def register_agent(name: str):
 
     The original function is preserved as ``fn.__wrapped__`` so that
     tests can access it directly when monkeypatching the module-level
-    ``build_agent`` reference.
+    factory reference.
     """
-    def decorator(fn: Callable[..., Agent]) -> Callable[..., Agent]:
+    def decorator(fn: Callable[..., Agent | Team]) -> Callable[..., Agent | Team]:
         if name in AGENT_REGISTRY:
             raise ValueError(f"Duplicate agent registration: '{name}'")
         AGENT_REGISTRY[name] = fn
@@ -36,7 +37,7 @@ def register_agent(name: str):
     return decorator
 
 
-def get_agent(name: str) -> Callable[..., Agent]:
+def get_agent(name: str) -> Callable[..., Agent | Team]:
     """Look up a registered agent factory by name."""
     if name not in AGENT_REGISTRY:
         raise KeyError(

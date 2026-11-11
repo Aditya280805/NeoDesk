@@ -12,26 +12,21 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from app.terminal.agent_registry import register_agent, list_agents
-from app.terminal.agent_scope import PortfolioChatRequest, PortfolioAnswer, AgentAnswer, make_scope, ReportAnswer, report_scope
+from app.terminal.agent_scope import PortfolioChatRequest, AgentAnswer, ReportAnswer, report_scope
 from app.terminal.options_report_context import REPORT_KINDS, load_report, bounded_report
 from app.terminal.options_snapshot import ChatRequest, OptionsContext, SnapshotService, normalize_snapshot
 from app.terminal.options_mcp import OptionsMCP, TOOL_VERSION
 from app.terminal.portfolio_risk_store import RiskStoreBusyError
 from app.terminal.portfolio_risk_diagnostics import risk_diagnostics
 from app.terminal.options_model import build_model, close_agent_model, options_run, provider_failure, provider_settings
+from app.terminal.agent_harness import RequestHarness, harness_context, current_harness, bounded_context, HarnessError
+from app.terminal.agent_scope import specialist_scope
+from app.terminal.agent_registry import get_agent
+from app.terminal import specialist_agents  # register fresh specialist factories
+from app.terminal import unified_chat  # register master_router factory
 
-PROMPT_VERSION = '2'
+RUN_CONTRACT_VERSION = 'snapshot.1'
 logger = logging.getLogger(__name__)
-
-
-@register_agent('options_monitor')
-def build_agent(config, snapshot, tools, *, scope=None):
-    from agno.agent import Agent
-    definition = scope or make_scope('chain', OptionsContext())
-    return Agent(
-        name='NeoDesk Options Monitor', model=build_model(config),
-        tools=tools if isinstance(tools, list) else [tools], tool_call_limit=2, output_schema=definition.output_contract,
-        telemetry=False, markdown=False, instructions=list(definition.instructions))
 
 
 class OptionsAgent:
@@ -39,7 +34,6 @@ class OptionsAgent:
 
     def __init__(self, config, store, market, *, portfolio_service=None, risk_store=None):
         from app.terminal.unified_chat import RoutingLimiter
-        self.routing_limiter = RoutingLimiter()
         self.config, self.store, self.market = config, store, market
         from app.terminal.portfolio_risk_store import PortfolioRiskStore
         self.risk_store = risk_store if risk_store is not None else PortfolioRiskStore(store)
@@ -48,6 +42,7 @@ class OptionsAgent:
         self.workers = {}
         self.recent = deque()
         self.refresh_active = set()
+        self.routing_limiter = RoutingLimiter(self)
         self.refresh_last = {}
         self.mcp = OptionsMCP(SnapshotService(market), config.options_mcp_port, portfolio_service=portfolio_service)
         with store.connect() as db:
@@ -82,7 +77,7 @@ class OptionsAgent:
         detail['duration_ms'] = round((time.monotonic() - started) * 1000)
         provider = provider_settings(self.config)
         detail.update(model=provider.model, provider=provider.provider, generation_token_budget=provider.token_budget,
-                      prompt_version=detail.get("prompt_version", PROMPT_VERSION), tool_version=TOOL_VERSION)
+                      prompt_version=detail.get("prompt_version", RUN_CONTRACT_VERSION), tool_version=TOOL_VERSION)
         with (self.store.connect() if db is None else nullcontext(db)) as db:
             db.execute('INSERT INTO option_agent_runs VALUES (?,?,?,?,?,?)',
                        (run_id, user_id, kind, status, datetime.now(UTC).isoformat(), json.dumps(detail, allow_nan=False)))
@@ -175,7 +170,7 @@ class OptionsAgent:
         return await self._snapshot(user_id, None, 'portfolio')
 
     def _generation(self, user_id, scope):
-        return self.market.session_generation(user_id) if scope == 'portfolio' else None
+        return self.market.session_generation(user_id) if scope in ('portfolio', 'risk') else None
 
     def _assert_generation(self, user_id, generation):
         if generation is not None:
@@ -193,7 +188,7 @@ class OptionsAgent:
                 raise HTTPException(429, 'Options monitoring is busy. Try again shortly.')
             self.refresh_active.add(user_id)
             self.refresh_last[user_id] = started
-        detail, state = {'stages': ['mcp'], 'scope': scope, 'prompt_version': make_scope(scope, context).prompt_version}, 'failed'
+        detail, state = {'stages': ['mcp'], 'scope': scope, 'prompt_version': f'snapshot.{scope}.1'}, 'failed'
         try:
             async with asyncio.timeout_at(deadline):
                 policy = await self._locked_worker(user_id, deadline, lambda check: self.risk_store.get_policy(user_id)) if scope == 'portfolio' else None
@@ -268,7 +263,7 @@ class OptionsAgent:
             rows = db.execute('SELECT message,answer,evidence,created_at FROM option_chat_turns WHERE conversation_id=? AND user_id=? ORDER BY id DESC LIMIT 20',
                               (str(conversation_id), user_id)).fetchall()
         context = json.loads(owned[0])
-        evidence_key = 'portfolio_snapshot' if context.get('scope') == 'portfolio' else 'snapshot'
+        evidence_key = 'risk_snapshot' if context.get('scope') == 'risk' else 'portfolio_snapshot' if context.get('scope') == 'portfolio' else 'snapshot'
         turns = []
         for message, answer, stored_evidence, created_at in reversed(rows):
             evidence = json.loads(stored_evidence)
@@ -278,7 +273,7 @@ class OptionsAgent:
                 continue
             # Old embedded-report and pre-risk evidence remain readable. Only
             # canonical references on new portfolio turns need owner-scoped hydration.
-            if evidence_key == 'portfolio_snapshot' and 'risk_report_id' in evidence:
+            if evidence_key in ('portfolio_snapshot', 'risk_snapshot') and 'risk_report_id' in evidence:
                 report_id = evidence.pop('risk_report_id')
                 report = self.risk_store.get_report(user_id, report_id)
                 if report is None:
@@ -287,19 +282,38 @@ class OptionsAgent:
             turns.append({'message': message, 'answer': answer, evidence_key: evidence, 'created_at': created_at})
         return {'conversation_id': str(conversation_id), 'context': context, 'turns': turns}
 
-    async def chat(self, user_id, body):
+    async def chat(self, user_id, body, *, harness=None, parent_run_id=None):
         context = OptionsContext(underlying=body.underlying, exchange=body.exchange, expiry=body.expiry)
-        return await self._chat(user_id, body, make_scope('chain', context), context)
+        return await self._run_specialist(user_id, body, specialist_scope('chain', context), context, harness=harness, parent_run_id=parent_run_id)
 
-    async def portfolio_chat(self, user_id, body):
-        return await self._chat(user_id, body, make_scope('portfolio', None), None)
+    async def portfolio_chat(self, user_id, body, *, harness=None, parent_run_id=None):
+        return await self._run_specialist(user_id, body, specialist_scope('portfolio', None), None, harness=harness, parent_run_id=parent_run_id)
 
-    async def explain_report(self,user_id,body):
-        return await self._chat(user_id,body,report_scope(body.report_kind,body.report_id),None)
+    async def portfolio_risk_chat(self, user_id, body, *, harness=None, parent_run_id=None):
+        return await self._run_specialist(user_id, body, specialist_scope('risk', None), None, harness=harness, parent_run_id=parent_run_id)
 
-    async def _chat(self, user_id, body, definition, context, selected_report=None):
+    async def explain_report(self, user_id, body, *, harness=None, parent_run_id=None):
+        return await self._run_specialist(user_id, body, report_scope(body.report_kind, body.report_id), None, harness=harness, parent_run_id=parent_run_id)
+
+    async def _run_specialist(self, user_id, body, definition, context, *, harness=None, parent_run_id=None):
+        active_harness = current_harness.get()
+        inherited_harness = active_harness[0] if active_harness else None
+        target_harness = harness or inherited_harness
+        if target_harness is not None:
+            with harness_context(target_harness, 'specialist'):
+                return await self._chat(user_id, body, definition, context, harness=target_harness, parent_run_id=parent_run_id)
+        created_harness = RequestHarness(auto=False,
+            input_limit=self.config.agent_input_token_estimate_limit,
+            context_limit=self.config.agent_context_token_limit)
+        with harness_context(created_harness, 'specialist'):
+            return await self._chat(user_id, body, definition, context, harness=created_harness, parent_run_id=parent_run_id)
+
+    async def _chat(self, user_id, body, definition, context, selected_report=None, *, harness=None, parent_run_id=None):
         started = time.monotonic()
-        deadline = started + self.deadline_seconds
+        active_harness = current_harness.get()
+        inherited_harness = active_harness[0] if active_harness else None
+        harness = harness or inherited_harness
+        deadline = min(started + self.deadline_seconds, harness.deadline if harness else started + self.deadline_seconds)
         scope = definition.scope
         report_mode = scope in REPORT_KINDS
         if not self.status()['configured']:
@@ -311,14 +325,18 @@ class OptionsAgent:
             stamp = time.monotonic()
             while self.recent and self.recent[0][0] < stamp - 60:
                 self.recent.popleft()
-            if user_id in self.active or user_id in self.refresh_active or user_id in self.mcp.pending:
+            inherited_admission = harness is not None and harness.admission_owner == (self, user_id)
+            if not inherited_admission and (user_id in self.active or user_id in self.refresh_active or user_id in self.mcp.pending):
                 raise HTTPException(409, 'An options request is already running. Please wait.')
-            if sum(uid == user_id for _, uid in self.recent) >= 6 or len(self.active) + len(self.refresh_active) >= 4:
+            if not inherited_admission and (sum(uid == user_id for _, uid in self.recent) >= 6 or len(self.active) + len(self.refresh_active) >= 4):
                 raise HTTPException(429, 'Options chat is busy. Please wait a minute before retrying.')
             self.active.add(user_id)
-            self.recent.append((stamp, user_id))
+            if not inherited_admission:
+                self.recent.append((stamp, user_id))
         run_id, conversation_id = str(uuid4()), str(body.conversation_id or uuid4())
-        detail, state = {'stages': [], 'scope':scope, 'prompt_version':definition.prompt_version}, 'failed'
+        effective_parent_run_id = parent_run_id or run_id
+        detail, state = {'stages': [], 'scope': scope, 'prompt_version': definition.prompt_version,
+                         'agent_id': definition.agent_id, 'parent_run_id': effective_parent_run_id}, 'failed'
         log_context = options_run.set(True)
         try:
             async with asyncio.timeout_at(deadline):
@@ -327,8 +345,8 @@ class OptionsAgent:
                     # Admission and the same overall deadline cover selection;
                     # shielding retains cancelled synchronous storage capacity.
                     selected_report = await asyncio.shield(self._start_worker(user_id,
-                        lambda: load_report(self.store,user_id,scope,body.report_id)))
-                policy = await self._locked_worker(user_id, deadline, lambda check: self.risk_store.get_policy(user_id)) if scope == 'portfolio' else None
+                        lambda: load_report(self.store, user_id, scope, body.report_id)))
+                policy = await self._locked_worker(user_id, deadline, lambda check: self.risk_store.get_policy(user_id)) if scope in ('portfolio', 'risk') else None
                 generation = await self._locked_worker(user_id, deadline, lambda check: self._generation(user_id, scope))
                 def load_history(check):
                     history = self.history(user_id, body.conversation_id)
@@ -337,28 +355,35 @@ class OptionsAgent:
                     return history
                 history = await self._locked_worker(user_id, deadline, load_history) if body.conversation_id else None
                 if history and history['context'] != definition.stored_context:
-                    raise HTTPException(409, 'Start a new conversation after changing the underlying, exchange or expiry.')
+                    raise HTTPException(409, {'code': 'conversation_scope_changed', 'message': 'Start a new conversation after changing scope, specialist, or market selection.'})
                 detail['stages'].append('mcp')
-                connection_options = ({'scope':scope,'selected_report':selected_report,'deadline_monotonic':deadline} if report_mode else
-                    {"scope":scope, "risk_policy":policy, "session_generation":generation, "deadline_monotonic":deadline} if scope == 'portfolio' else {})
+                mcp_scope = 'portfolio_analysis' if definition.allowed_tool == 'get_portfolio_analysis_snapshot' else scope
+                connection_options = ({'scope': scope, 'selected_report': selected_report, 'deadline_monotonic': deadline} if report_mode else
+                    {"scope": mcp_scope, "risk_policy": policy, "session_generation": generation, "deadline_monotonic": deadline} if scope in ('portfolio', 'risk') else
+                    {"scope": scope, "deadline_monotonic": deadline})
+                if harness:
+                    connection_options['harness'] = harness
                 async with self.mcp.connection(user_id, context, run_id, **connection_options) as connection:
-                    stage_started = time.monotonic()
-                    snapshot = await (connection._snapshot(definition.allowed_tool) if report_mode else self._portfolio_read(connection, detail) if scope == 'portfolio' else connection.snapshot())
-                    if scope == 'portfolio':
-                        snapshot = self._risk_envelope(snapshot)
-                        detail['risk_report_id'] = snapshot['risk_report']['report_id']
-                        detail['risk_diagnostics'] = risk_diagnostics(self._risk_report(snapshot), (time.monotonic() - started) * 1000)
-                    detail['mcp_ms'] = round((time.monotonic()-stage_started)*1000)
-                    id_key = 'report_id' if report_mode else 'evidence_id' if scope == 'portfolio' else 'snapshot_id'
+                    try:
+                        stage_started = time.monotonic()
+                        snapshot = await connection._snapshot(definition.allowed_tool)
+                        detail['mcp_ms'] = round((time.monotonic() - stage_started) * 1000)
+                    finally:
+                        diagnostic = getattr(connection, 'risk_diagnostic', None)
+                        if diagnostic:
+                            detail['risk_diagnostics'] = dict(diagnostic)
+                    id_key = 'report_id' if report_mode else 'evidence_id' if scope in ('portfolio', 'risk') else 'snapshot_id'
                     detail[id_key] = snapshot[id_key]
                     if scope == 'portfolio':
                         detail.update(schema_version=snapshot.get('schema_version'),
-                            data_quality={'completeness':snapshot.get('completeness'),
-                                'section_states':{k:v.get('state') for k,v in snapshot.get('sections',{}).items()}})
+                            data_quality={'completeness': snapshot.get('completeness'),
+                                'section_states': {k: v.get('state') for k, v in snapshot.get('sections', {}).items()}})
                     previous = [{'user': t['message'], 'assistant': t['answer']} for t in (history or {}).get('turns', [])[-4:]]
+                    if harness:
+                        _, previous = bounded_context({'question': body.message, 'evidence': snapshot}, previous, input_limit=harness.input_limit)
                     def encode():
                         return json.dumps({'previous_conversation': previous, 'question': body.message,
-                            ('current_report' if report_mode else 'current_portfolio_snapshot' if scope == 'portfolio' else 'current_snapshot'): snapshot}, allow_nan=False)
+                            ('current_report' if report_mode else 'current_risk_report' if scope == 'risk' else 'current_portfolio_snapshot' if scope == 'portfolio' else 'current_snapshot'): snapshot}, allow_nan=False)
                     prompt = encode()
                     while len(prompt.encode('utf-8')) > 65536 and previous:
                         previous.pop(0)
@@ -367,34 +392,51 @@ class OptionsAgent:
                         detail['failure_reason'] = 'context_limit'
                         raise HTTPException(503, 'Current evidence exceeds the safe input context limit.')
                     detail['stages'].append('model')
-                    from app.terminal.external_mcp import external_tools
-                    async with (nullcontext([]) if report_mode else external_tools(self.config.external_mcp_config, scope)) as extra_tools:
-                        selected_tools = [connection.tools, *extra_tools] if extra_tools else connection.tools
-                        agent = build_agent(self.config, snapshot, selected_tools, scope=definition) if scope == 'portfolio' or report_mode else build_agent(self.config, snapshot, selected_tools)
-                        stage_started = time.monotonic()
-                        try:
-                            result = await agent.arun(prompt)
-                        finally:
-                            await close_agent_model(agent)
-                            detail['model_ms'] = round((time.monotonic()-stage_started)*1000)
+                    factory = get_agent(definition.agent_id)
+                    agent = factory(self.config, snapshot, [connection.tools], scope=definition)
+                    stage_started = time.monotonic()
+                    try:
+                        result = await agent.arun(prompt)
+                    finally:
+                        await close_agent_model(agent)
+                        detail['model_ms'] = round((time.monotonic() - stage_started) * 1000)
                     await self._locked_worker(user_id, deadline, lambda check: self._assert_generation(user_id, generation))
                     detail['tool_calls'] = self.mcp.capabilities[connection.token].calls
                     if getattr(result, 'status', None) is not None and result.status.value != 'COMPLETED':
                         raise ValueError('Agent did not complete')
                     detail['stages'].append('output')
                     content = result.content
-                    contract = ReportAnswer if report_mode else PortfolioAnswer if scope == 'portfolio' else AgentAnswer
+                    contract = definition.output_contract
                     answer = contract.model_validate_json(content) if isinstance(content, str) else contract.model_validate(content)
-                    references = answer.report_ids if report_mode else [str(x) for x in answer.evidence_ids] if scope == 'portfolio' else answer.snapshot_ids
-                    if not answer.answer.strip() or references != [snapshot[id_key]]:
-                        raise ValueError('Invalid answer evidence')
-                    if report_mode and answer.evidence_ids != snapshot['evidence_ids']:
-                        raise ValueError('Invalid report evidence citations')
-                    if scope == 'portfolio' and [str(x) for x in answer.risk_report_ids] != [snapshot['risk_report']['report_id']]:
-                        raise ValueError('Invalid answer report')
+                    if not answer.answer.strip():
+                        raise ValueError('Invalid answer: empty')
+                    if report_mode:
+                        if answer.report_ids != [snapshot['report_id']]:
+                            raise ValueError('Invalid report ID citation')
+                        if answer.evidence_ids != snapshot['evidence_ids']:
+                            raise ValueError('Invalid report evidence citations')
+                        references = answer.report_ids
+                    elif scope == 'chain':
+                        if answer.snapshot_ids != [snapshot['snapshot_id']]:
+                            raise ValueError('Invalid snapshot ID citation')
+                        references = answer.snapshot_ids
+                    elif scope == 'portfolio':
+                        if [str(x) for x in answer.evidence_ids] != [snapshot['evidence_id']]:
+                            raise ValueError('Invalid portfolio evidence citation')
+                        references = [str(x) for x in answer.evidence_ids]
+                    elif scope == 'risk':
+                        if [str(x) for x in answer.evidence_ids] != [snapshot['evidence_id']]:
+                            raise ValueError('Invalid risk evidence citation')
+                        if [str(x) for x in answer.risk_report_ids] != [snapshot['risk_report']['report_id']]:
+                            raise ValueError('Invalid risk report citation')
+                        references = [str(x) for x in answer.evidence_ids]
+                    else:
+                        raise ValueError(f'Unsupported scope: {scope}')
                     metrics = getattr(result, 'metrics', None)
                     detail['tokens'] = {k: getattr(metrics, k, None) for k in ('input_tokens', 'output_tokens', 'reasoning_tokens', 'total_tokens')}
                 detail['stages'].append('publication')
+                if harness:
+                    detail['harness'] = harness.trace()
                 def persist(check):
                     check()
                     self._assert_generation(user_id, generation)
@@ -404,15 +446,15 @@ class OptionsAgent:
                         check()
                         self._assert_generation(user_id, generation)
                         db.execute('BEGIN')
-                        if scope == 'portfolio':
+                        if scope == 'risk':
                             self.risk_store.save_report(db, user_id, self._risk_report(snapshot))
                         if not history:
                             db.execute('INSERT INTO option_chat_conversations VALUES (?,?,?,?)',
                                        (conversation_id, user_id, json.dumps(definition.stored_context), created))
                         stored_evidence = dict(snapshot)
                         if report_mode:
-                            stored_evidence = {'report_id':snapshot['report_id']}
-                        if scope == 'portfolio':
+                            stored_evidence = {'report_id': snapshot['report_id']}
+                        elif scope == 'risk':
                             stored_evidence.pop('risk_report')
                             stored_evidence['risk_report_id'] = snapshot['risk_report']['report_id']
                         db.execute('INSERT INTO option_chat_turns(conversation_id,user_id,message,answer,evidence,created_at) VALUES (?,?,?,?,?,?)',
@@ -432,11 +474,41 @@ class OptionsAgent:
                 created = await self._locked_worker(user_id, deadline, persist)
             state = 'completed'
             logger.info('options_run id=%s kind=chat status=completed duration_ms=%s', run_id, detail['duration_ms'])
-            return {'conversation_id': conversation_id, 'run_id': run_id, 'answer': answer.answer,
-                    **({'report_ids':references,'evidence_ids':answer.evidence_ids,'report':snapshot} if report_mode else {}),
-                    **({'risk_report_ids': [str(x) for x in answer.risk_report_ids]} if scope == 'portfolio' else {}),
-                    **({} if report_mode else {('evidence_ids' if scope == 'portfolio' else 'snapshot_ids'): references,
-                    ('portfolio_snapshot' if scope == 'portfolio' else 'snapshot'): snapshot}), 'created_at': created, 'read_only': True}
+            base_reply = {
+                'conversation_id': conversation_id,
+                'run_id': run_id,
+                'parent_run_id': effective_parent_run_id,
+                'agent_id': definition.agent_id,
+                'answer': answer.answer,
+                'created_at': created,
+                'read_only': True,
+            }
+            if scope == 'risk':
+                return {
+                    **base_reply,
+                    'evidence_ids': references,
+                    'risk_report_ids': [str(x) for x in answer.risk_report_ids],
+                    'risk_snapshot': snapshot,
+                }
+            elif scope == 'portfolio':
+                return {
+                    **base_reply,
+                    'evidence_ids': references,
+                    'portfolio_snapshot': snapshot,
+                }
+            elif report_mode:
+                return {
+                    **base_reply,
+                    'report_ids': references,
+                    'evidence_ids': answer.evidence_ids,
+                    'report': snapshot,
+                }
+            else:  # chain
+                return {
+                    **base_reply,
+                    'snapshot_ids': references,
+                    'snapshot': snapshot,
+                }
         except RiskStoreBusyError:
             detail['failure_reason'] = 'risk_store_busy'
             raise HTTPException(503, 'Risk storage is busy. Retry shortly.', headers={'Retry-After':'1', 'X-Options-Run-Id':run_id}) from None
@@ -450,11 +522,17 @@ class OptionsAgent:
             state = 'cancelled'
             raise
         except Exception as error:
-            detail['failure_reason'], message = provider_failure(self.config, error)
+            if isinstance(error, HarnessError):
+                detail['failure_reason'], message = error.code, 'The request exceeded its safe execution budget.'
+            else:
+                detail['failure_reason'], message = provider_failure(self.config, error)
             raise HTTPException(503, message, headers={'X-Options-Run-Id': run_id}) from None
         finally:
+            if harness:
+                detail['harness'] = harness.trace()
             try:
                 await self._finish(user_id, run_id, 'chat', state, started, detail, deadline)
             finally:
-                self._release(user_id, self.active)
+                if not inherited_admission:
+                    self._release(user_id, self.active)
                 options_run.reset(log_context)

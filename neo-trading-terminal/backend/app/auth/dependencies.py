@@ -54,3 +54,22 @@ def get_current_user(request: Request) -> dict:
     }
     request.state.user = user_data
     return user_data
+
+
+def get_request_user_id(request: Request | None) -> int:
+    """Resolve authenticated user id, allowing legacy/test single-user mode only when marked."""
+    if request is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in to your terminal.",
+        )
+    user = getattr(request.state, "user", None)
+    if user and user.get("id"):
+        return int(user["id"])
+    legacy_uid = getattr(request.state, "legacy_user_id", None)
+    if legacy_uid is not None:
+        return int(legacy_uid)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sign in to your terminal.",
+    )

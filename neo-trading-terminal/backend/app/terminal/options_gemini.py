@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from agno.models.google import Gemini
 from google import genai
 from google.genai import types
+from app.terminal.agent_harness import bounded_invoke
 
 
 @dataclass
@@ -65,7 +66,7 @@ class BoundedGemini(Gemini):
         self.requests_remaining -= 1
         self.max_output_tokens = self.generation_remaining
         try:
-            response = await super().ainvoke(*args, **kwargs)
+            response = await bounded_invoke(super().ainvoke, self.generation_remaining, *args, reasoning=True, **kwargs)
         except Exception as error:
             backup = self.key_rotator.next_key(error) if self.key_rotator else None
             if not backup or self.requests_remaining <= 0:
@@ -73,7 +74,7 @@ class BoundedGemini(Gemini):
             await self.aclose()
             self.api_key = backup.get_secret_value()
             self.requests_remaining -= 1
-            response = await super().ainvoke(*args, **kwargs)
+            response = await bounded_invoke(super().ainvoke, self.generation_remaining, *args, reasoning=True, **kwargs)
         usage = response.response_usage
         if usage is None or usage.output_tokens is None or usage.reasoning_tokens is None:
             spent = self.generation_remaining

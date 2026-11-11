@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from typing import Literal
 from uuid import UUID
+from app.auth.dependencies import get_request_user_id as get_user_id
 from app.brokers.base_broker import BrokerError
 
 paper_router = APIRouter()
@@ -14,10 +15,6 @@ class PaperOrder(BaseModel):
     order_type: Literal['MARKET','LIMIT'] = 'MARKET'
     limit_price: float | None = Field(default=None,gt=0,allow_inf_nan=False)
     request_id: UUID
-
-def get_user_id(request: Request) -> int:
-    user = getattr(request.state, 'user', None)
-    return user['id'] if user else 1
 
 @paper_router.get('/api/paper')
 def account(request: Request):

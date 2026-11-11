@@ -22,6 +22,7 @@ from app.terminal.portfolio_risk_diagnostics import risk_diagnostics
 
 logger = logging.getLogger(__name__)
 TOOL_VERSION = '1'
+PORTFOLIO_SCOPES = frozenset(('portfolio', 'portfolio_analysis', 'risk'))
 
 
 @dataclass
@@ -40,11 +41,13 @@ class Capability:
     snapshot_json: str | None = None
     selected_report: dict | None = None
     risk_diagnostic: dict | None = None
+    harness: object | None = field(default=None, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
     def __post_init__(self):
         names = {'chain': 'get_option_snapshot', 'portfolio': 'get_portfolio_snapshot'}
+        names.update(portfolio_analysis='get_portfolio_analysis_snapshot', risk='get_portfolio_risk_report')
         names.update({kind:f'get_{kind}_report' for kind in ('strategy','scan','alert','backtest')})
         if self.scope not in names:
             raise ValueError('Invalid capability scope')
@@ -137,13 +140,15 @@ class OptionsMCP:
                 raise ValueError('Expired capability')
             if capability.deadline_monotonic <= time.monotonic():
                 raise ValueError('Request deadline expired')
-            if capability.scope == 'portfolio':
+            if capability.scope in PORTFOLIO_SCOPES:
                 if self.portfolio_service is None or not capability.session_generation:
                     raise ValueError('Portfolio unavailable')
                 await self._work(capability, self.portfolio_service.assert_generation, capability.user_id, capability.session_generation, deadline_monotonic=capability.deadline_monotonic)
                 if capability.deadline_monotonic <= time.monotonic():
                     raise ValueError('Request deadline expired')
             capability.calls += 1
+            if capability.harness:
+                capability.harness.read_tool()
             # One prefetch plus two model tool calls. Hard server-side bound.
             if capability.calls > 3:
                 raise ValueError('Tool budget exhausted')
@@ -154,16 +159,18 @@ class OptionsMCP:
                     raise ValueError('Broker request already running')
                 if len(self.pending) >= 4:
                     raise ValueError('Broker capacity exhausted')
-                if capability.scope == 'portfolio':
+                if capability.scope in PORTFOLIO_SCOPES:
                     work = asyncio.to_thread(self.portfolio_service.fetch, capability.user_id,
                         expected_generation=capability.session_generation, force=capability.force_refresh,
                         deadline_monotonic=capability.deadline_monotonic)
                 else:
                     work = asyncio.to_thread(self.snapshots.fetch, capability.user_id, capability.context)
+                if capability.harness:
+                    capability.harness.broker_fetches += 1
                 snapshot = await self._work(capability, lambda: None, coroutine=work)
                 if capability.deadline_monotonic <= time.monotonic():
                     raise ValueError('Request deadline expired')
-                if capability.scope == 'portfolio':
+                if capability.scope in PORTFOLIO_SCOPES:
                     from app.terminal.portfolio_risk_contracts import PortfolioRiskEnvelope
                     from app.terminal.portfolio_risk import evaluate_portfolio_risk
                     from datetime import UTC, datetime
@@ -191,7 +198,17 @@ class OptionsMCP:
                     capability.snapshot_json = serialized
                 else:
                     capability.snapshot_json = json.dumps(snapshot, allow_nan=False)
+            elif capability.harness:
+                capability.harness.cache_hits += 1
             result = json.loads(capability.snapshot_json)
+            if capability.scope == 'portfolio_analysis':
+                from app.terminal.portfolio_contracts import PortfolioSnapshot
+                result.pop('risk_report', None)
+                # Risk-only broker inputs are not part of analysis evidence.
+                result.pop('risk_inputs', None)
+                result = PortfolioSnapshot.model_validate(result).model_dump(mode='json')
+            elif capability.scope == 'risk':
+                result = {'evidence_id': result['evidence_id'], 'risk_report': result['risk_report']}
             if capability.deadline_monotonic <= time.monotonic():
                 raise ValueError('Request deadline expired')
             return result
@@ -249,6 +266,9 @@ class OptionsMCP:
                     return await self._read(get_http_request().scope['options_capability'])
                 except Exception:
                     raise ValueError('Saved report unavailable or request budget exhausted.') from None
+            for name in ('get_portfolio_analysis_snapshot', 'get_portfolio_risk_report'):
+                mcp.tool(name=name, description='Read only the authorized immutable specialist evidence for this request; no arguments.',
+                    annotations={'readOnlyHint':True,'destructiveHint':False,'openWorldHint':False})(saved_report)
             for kind in ('strategy','scan','alert','backtest'):
                 mcp.tool(name=f'get_{kind}_report', description='Read the immutable report selected by the authenticated application; no arguments.',
                     annotations={'readOnlyHint':True,'destructiveHint':False,'openWorldHint':False})(saved_report)
@@ -292,21 +312,22 @@ class OptionsMCP:
                 sock.close()
 
     @asynccontextmanager
-    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None):
+    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None, harness=None):
         if not self.ready:
             raise HTTPException(503, 'Options monitoring is unavailable. The internal MCP service is not ready.')
         from agno.tools.mcp import MCPTools
         from agno.tools.mcp.params import StreamableHTTPClientParams
         token = secrets.token_urlsafe(32)
-        if scope == 'portfolio' and not isinstance(risk_policy, RiskPolicy):
+        if scope in PORTFOLIO_SCOPES and not isinstance(risk_policy, RiskPolicy):
             raise ValueError('Portfolio requires captured risk policy')
-        if scope == 'portfolio' and (context is not None or not session_generation):
+        if scope in PORTFOLIO_SCOPES and (context is not None or not session_generation):
             raise ValueError('Portfolio requires captured session generation and no chain context')
         if scope == 'chain' and not isinstance(context, OptionsContext):
             raise ValueError('Chain requires selected context')
         capability = Capability(user_id, context.model_copy(deep=True) if context is not None else None,
             run_id, time.monotonic() + 65, scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
             deadline_monotonic=deadline_monotonic if deadline_monotonic is not None else time.monotonic()+60)
+        capability.harness = harness
         if scope in ('strategy','scan','alert','backtest'):
             if context is not None or session_generation is not None or not selected_report or selected_report.get('report_kind') != scope:
                 raise ValueError('Captured selected report required')

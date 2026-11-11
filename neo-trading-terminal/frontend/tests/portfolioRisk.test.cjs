@@ -76,3 +76,16 @@ test('active policy 401 still expires the current session',async()=>{
 test('unmount never reactivates an expired reload generation',async()=>{
  let resolve;const h=settingsHarness();h.queue(response(policyFixture()));h.render();await settle();h.expire();h.queue(()=>new Promise(r=>resolve=r));button(h.render(),'Retry policy load').props.onClick();h.expire();h.unmount();resolve(response({detail:'Old reload'},401));await settle();assert.deepEqual(h.dispatched,[])
 })
+test('report component renders frozen specialist_api risk.json payload without portfolio sections',()=>{
+ const fs=require('node:fs'),path=require('node:path'),React=require('react'),render=require('react-dom/server').renderToStaticMarkup
+ const Panel=loadComponent('src/components/PortfolioRiskPanel.tsx')
+ const fixture=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../../backend/evals/fixtures/specialist_api/risk.json'),'utf8'))
+ const report=fixture.response.risk_snapshot.risk_report
+ const html=render(React.createElement(Panel,{report,currentRevision:0}))
+ assert.match(html,new RegExp(report.report_id))
+ assert.match(html,/portfolio-risk\.1/)
+ assert.match(html,/cannot assess/i)
+ assert.match(html,/limit not configured/i)
+ assert.doesNotMatch(html,/portfolio-evidence/)
+ assert.doesNotMatch(html,/Portfolio summaries/)
+})

@@ -1,0 +1,104 @@
+{
+  "agent_id": "options_trading_analysis",
+  "endpoint": "/api/options-agent/chat",
+  "method": "POST",
+  "request": {
+    "exchange": "nse_fo",
+    "expiry": "26Nov2026",
+    "message": "Analyze ATM strikes, volume, and open interest for NIFTY.",
+    "underlying": "NIFTY"
+  },
+  "response": {
+    "agent_id": "options_trading_analysis",
+    "answer": "ATM strike 24000 call premium is 110.00 with total call open interest of 400. Put/call ratio is 1.50 across available strikes.",
+    "conversation_id": "4f3c174d-cb84-4427-a83e-b77c37832224",
+    "created_at": "2026-11-11T10:34:11.950967+00:00",
+    "parent_run_id": "3e310873-4729-43e2-8de2-1933c7d6bcd1",
+    "read_only": true,
+    "run_id": "3e310873-4729-43e2-8de2-1933c7d6bcd1",
+    "snapshot": {
+      "exchange": "nse_fo",
+      "exchange_timestamp": null,
+      "expiry": "26Nov2026",
+      "identity_verification": {
+        "exchange": false,
+        "expiry": true,
+        "underlying": false
+      },
+      "limitations": [
+        "Market identity is verified only for metadata supplied by the provider; see identity_verification.",
+        "REST snapshot; retrieval time is not an exchange quote timestamp. Freshness is unverified.",
+        "Open-interest totals and put/call ratio cover returned strikes only, not the whole market.",
+        "IV, Greeks, bid/ask spreads and exchange timestamps are unavailable in this tool.",
+        "Monitoring refreshes only while this page is open; no background alerts are active."
+      ],
+      "lot_size": 65.0,
+      "retrieved_at": "2026-11-11T10:34:11.773933+00:00",
+      "rows": [
+        {
+          "ltp": 110.0,
+          "open_interest": 100.0,
+          "side": "CALL",
+          "strike": 24000.0,
+          "symbol": "NIFTY-24000",
+          "volume": 20.0
+        },
+        {
+          "ltp": 90.0,
+          "open_interest": 200.0,
+          "side": "PUT",
+          "strike": 24000.0,
+          "symbol": "NIFTY-24000",
+          "volume": 20.0
+        },
+        {
+          "ltp": 60.0,
+          "open_interest": 300.0,
+          "side": "CALL",
+          "strike": 24100.0,
+          "symbol": "NIFTY-24100",
+          "volume": 20.0
+        },
+        {
+          "ltp": 140.0,
+          "open_interest": 400.0,
+          "side": "PUT",
+          "strike": 24100.0,
+          "symbol": "NIFTY-24100",
+          "volume": 20.0
+        }
+      ],
+      "snapshot_id": "47b7840e-fc63-4462-a320-116e665a6b07",
+      "source": "kotak",
+      "summary": {
+        "call_open_interest": 400.0,
+        "highest_open_interest": {
+          "CALL": {
+            "ltp": 60.0,
+            "open_interest": 300.0,
+            "side": "CALL",
+            "strike": 24100.0,
+            "symbol": "NIFTY-24100",
+            "volume": 20.0
+          },
+          "PUT": {
+            "ltp": 140.0,
+            "open_interest": 400.0,
+            "side": "PUT",
+            "strike": 24100.0,
+            "symbol": "NIFTY-24100",
+            "volume": 20.0
+          }
+        },
+        "put_call_ratio": 1.5,
+        "put_open_interest": 600.0
+      },
+      "underlying": "NIFTY"
+    },
+    "snapshot_ids": [
+      "47b7840e-fc63-4462-a320-116e665a6b07"
+    ]
+  },
+  "scope": "chain",
+  "status_code": 200
+}

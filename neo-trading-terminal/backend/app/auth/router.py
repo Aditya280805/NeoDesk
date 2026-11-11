@@ -15,21 +15,40 @@ from app.terminal.portfolio import snapshot
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # Rate limit storage (IP -> list of timestamps)
+_RATE_WINDOW_SECONDS = 60
+_MAX_RATE_IPS = 4096
 _register_attempts: Dict[str, List[float]] = {}
 _login_attempts: Dict[str, List[float]] = {}
 _rate_lock = Lock()
 
 
-def _check_rate_limit(attempts: Dict[str, List[float]], ip: str, max_limit: int, action: str):
+def _check_rate_limit(attempts: Dict[str, List[float]], ip: str, max_limit: int, action: str, lock: Lock = _rate_lock):
     now = time.time()
-    with _rate_lock:
-        recent = [t for t in attempts.get(ip, []) if now - t < 60]
+    cutoff = now - _RATE_WINDOW_SECONDS
+    with lock:
+        if len(attempts) > 1000:
+            stale = [key for key, stamps in attempts.items() if not any(t > cutoff for t in stamps)]
+            for key in stale:
+                del attempts[key]
+        recent = [t for t in attempts.get(ip, []) if t > cutoff]
         if len(recent) >= max_limit:
             attempts[ip] = recent
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Too many {action} attempts. Wait a minute before trying again.",
             )
+        if not recent and ip in attempts:
+            del attempts[ip]
+        if ip not in attempts and len(attempts) >= _MAX_RATE_IPS:
+            for key in list(attempts):
+                active = [t for t in attempts[key] if t > cutoff]
+                if active:
+                    attempts[key] = active
+                else:
+                    del attempts[key]
+            while len(attempts) >= _MAX_RATE_IPS:
+                oldest_key = min(attempts, key=lambda k: max(attempts[k], default=0.0))
+                del attempts[oldest_key]
         recent.append(now)
         attempts[ip] = recent
 
@@ -60,17 +79,32 @@ def kotak_login(body: KotakLogin, request: Request, response: Response, backgrou
     from datetime import datetime, UTC
     stale=not updated or (datetime.now(UTC)-datetime.fromisoformat(updated)).total_seconds()>86400
     if stale and lock.acquire(blocking=False):
+        sync_by_user=getattr(request.app.state,'catalogue_sync_by_user',None)
+        user_status={'running':True,'error':None}
+        if isinstance(sync_by_user,dict):
+            sync_by_user[user['id']]=user_status
         progress=request.app.state.catalogue_sync
         progress.update(running=True,error=None)
         def sync_catalogue():
             try:
                 market.sync(user_id=user['id'])
             except Exception:
-                progress['error']='Catalogue sync is unavailable. Use Retry in Connections.'
+                err_msg='Catalogue sync is unavailable. Use Retry in Connections.'
+                user_status['error']=err_msg
+                progress['error']=err_msg
             finally:
+                user_status['running']=False
                 progress['running']=False
+                if lock.locked():
+                    lock.release()
+        try:
+            background_tasks.add_task(sync_catalogue)
+        except Exception:
+            user_status['running']=False
+            progress['running']=False
+            if lock.locked():
                 lock.release()
-        background_tasks.add_task(sync_catalogue)
+            raise
     token=create_token(user['id'],user['email'],request.app.state.jwt_secret,expires_hours=8)
     response.set_cookie('neodesk_token',token,httponly=True,samesite='strict',
                         secure=request.app.state.is_production,max_age=8*3600)
@@ -102,7 +136,8 @@ def register(body: UserRegister, request: Request, response: Response):
 
     try:
         user = create_user(store, clean_email, body.password, body.display_name)
-        starting_bal = getattr(settings, "paper_starting_balance", 100000)
+        app_config = getattr(request.app.state, "config", settings)
+        starting_bal = getattr(app_config, "paper_starting_balance", 100000)
         store.init_user_account(user["id"], starting_bal)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

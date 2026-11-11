@@ -30,5 +30,5 @@ def test_portfolio_risk_cli_is_explicit_offline_and_versioned():
     assert report['scope'] == 'portfolio-risk'
     assert report['total'] == report['passed'] == 11
     assert report['model_evaluated'] is False and report['cost'] is None
-    assert report['prompt_version'] == 'portfolio.2'
+    assert report['prompt_version'] == 'risk.1'
     assert report['explanation_rubric']['model_scored'] is False

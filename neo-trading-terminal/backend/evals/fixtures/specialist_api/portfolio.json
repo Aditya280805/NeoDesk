@@ -1,0 +1,126 @@
+{
+  "agent_id": "portfolio_analysis",
+  "endpoint": "/api/options-agent/portfolio/chat",
+  "method": "POST",
+  "request": {
+    "message": "Summarize portfolio cash balances, holdings, and open positions."
+  },
+  "response": {
+    "agent_id": "portfolio_analysis",
+    "answer": "Portfolio funds show 100000.00 available cash balance. Holdings and open positions contain zero active commitments.",
+    "conversation_id": "be88a638-1afb-4810-937a-0a596f95cce7",
+    "created_at": "2026-11-11T10:34:12.029155+00:00",
+    "evidence_ids": [
+      "1b7bef38-c315-4e07-8712-5e8cbd2c612c"
+    ],
+    "parent_run_id": "d28f1685-c5de-4fbd-9d26-416230dad68e",
+    "portfolio_snapshot": {
+      "atomic": false,
+      "cache_age_seconds": "0",
+      "completeness": "partial",
+      "evidence_id": "1b7bef38-c315-4e07-8712-5e8cbd2c612c",
+      "exchange_freshness": "unknown",
+      "exchange_timestamp": null,
+      "limitations": [
+        "Section observations are non-atomic.",
+        "Provider MTM and calculated cash-flow P&L have distinct bases; holdings and positions may overlap."
+      ],
+      "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+      "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+      "schema_version": "portfolio.v1",
+      "sections": {
+        "funds": {
+          "issues": [
+            {
+              "code": "missing_value",
+              "field": "reserved",
+              "row_id": null
+            },
+            {
+              "code": "missing_value",
+              "field": "realized",
+              "row_id": null
+            },
+            {
+              "code": "missing_value",
+              "field": "unrealized",
+              "row_id": null
+            }
+          ],
+          "provenance": {
+            "available": {
+              "basis": "provider_funds_INR",
+              "formula_version": null,
+              "input_paths": [
+                "Net"
+              ],
+              "source": "provider"
+            }
+          },
+          "provider_timestamp": null,
+          "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+          "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+          "rows": [],
+          "source_count": null,
+          "state": "partial",
+          "values": {
+            "available": "100000.00",
+            "realized": null,
+            "reserved": null,
+            "unrealized": null
+          }
+        },
+        "holdings": {
+          "issues": [],
+          "provenance": {},
+          "provider_timestamp": null,
+          "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+          "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+          "rows": [],
+          "source_count": 0,
+          "state": "available",
+          "values": {}
+        },
+        "orders": {
+          "issues": [],
+          "provenance": {},
+          "provider_timestamp": null,
+          "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+          "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+          "rows": [],
+          "source_count": 0,
+          "state": "available",
+          "values": {}
+        },
+        "positions": {
+          "issues": [],
+          "provenance": {},
+          "provider_timestamp": null,
+          "retrieval_finished_at": "2026-11-11T10:34:12.005454Z",
+          "retrieval_started_at": "2026-11-11T10:34:12.005454Z",
+          "rows": [],
+          "source_count": 0,
+          "state": "available",
+          "values": {}
+        }
+      },
+      "source": "kotak",
+      "source_observed_at": "2026-11-11T10:34:12.005454Z",
+      "summary": {
+        "available": "100000.00",
+        "holdings_pnl": "0",
+        "holdings_value": "0",
+        "invested": "0",
+        "positions_calculated_pnl": "0",
+        "positions_provider_pnl": "0",
+        "realized": null,
+        "reserved": null,
+        "unrealized": null
+      }
+    },
+    "read_only": true,
+    "run_id": "d28f1685-c5de-4fbd-9d26-416230dad68e"
+  },
+  "scope": "portfolio",
+  "status_code": 200
+}

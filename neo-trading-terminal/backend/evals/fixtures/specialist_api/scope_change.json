@@ -1,0 +1,22 @@
+{
+  "agent_id": null,
+  "endpoint": "/api/options-agent/unified-chat",
+  "method": "POST",
+  "request": {
+    "context": {
+      "exchange": "nse_fo",
+      "expiry": "26Nov2026",
+      "underlying": "NIFTY"
+    },
+    "conversation_id": "4f3c174d-cb84-4427-a83e-b77c37832224",
+    "message": "Now evaluate my portfolio risk limits."
+  },
+  "response": {
+    "detail": {
+      "code": "conversation_scope_changed",
+      "message": "Start a new conversation after changing scope, specialist, or market selection."
+    }
+  },
+  "scope": "scope_change",
+  "status_code": 409
+}

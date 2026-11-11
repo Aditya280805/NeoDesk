@@ -3,9 +3,10 @@ import asyncio
 import json
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from test_options_agent import app, client, module  # shared isolated API fixtures
+from app.terminal.agent_registry import AGENT_REGISTRY
 
 
 def test_exception_during_application_lifespan_closes_private_listener(app):
@@ -31,9 +32,9 @@ def test_snapshot_refresh_has_independent_throttle(client):
     assert client.post('/api/options-agent/chat', json={'message': 'Explain OI'}).status_code == 200
 
 
-def test_invalid_evidence_fails_and_records_sanitized_failure(client, app):
-    module.build_agent.side_effect = lambda *args: SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(
-        content={'answer': 'Wrong evidence', 'snapshot_ids': ['invented']})))
+def test_invalid_evidence_fails_and_records_sanitized_failure(client, app, monkeypatch):
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *args, **kw: SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(
+        content={'answer': 'Wrong evidence', 'snapshot_ids': ['invented']}))))
     result = client.post('/api/options-agent/chat', json={'message': 'Explain OI'})
     assert result.status_code == 503
     run_id = result.headers['X-Options-Run-Id']
@@ -45,11 +46,11 @@ def test_invalid_evidence_fails_and_records_sanitized_failure(client, app):
         assert 'output' in row[1] and 'test-key' not in row[1]
 
 
-def test_deadline_releases_agent_and_records_timeout(client, app):
+def test_deadline_releases_agent_and_records_timeout(client, app, monkeypatch):
     async def slow(*args):
         await asyncio.sleep(1)
     app.state.options_agent.deadline_seconds = .1
-    module.build_agent.side_effect = lambda *args: SimpleNamespace(arun=slow)
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *args, **kw: SimpleNamespace(arun=slow))
     result = client.post('/api/options-agent/chat', json={'message': 'Explain OI'})
     assert result.status_code == 504
     # A timed-out request retains admission until its tracked trace worker ends.
@@ -75,12 +76,12 @@ def test_run_diagnostics_are_user_scoped(client, app):
 
 
 @pytest.mark.parametrize('code,expected', [(429, 'quota'), (401, 'GEMINI_API_KEY'), (403, 'permission')])
-def test_gemini_provider_errors_are_actionable_and_redacted(client, app, code, expected):
+def test_gemini_provider_errors_are_actionable_and_redacted(client, app, monkeypatch, code, expected):
     from agno.exceptions import ModelProviderError
     from pydantic import SecretStr
     app.state.config.options_agent_provider = 'gemini'
     app.state.config.gemini_api_key = SecretStr('gemini-fixture-secret')
-    module.build_agent.side_effect = ModelProviderError(message='gemini-fixture-secret', status_code=code)
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', Mock(side_effect=ModelProviderError(message='gemini-fixture-secret', status_code=code)))
     result = client.post('/api/options-agent/chat', json={'message':'Explain OI'})
     assert result.status_code == 503
     assert expected in result.text

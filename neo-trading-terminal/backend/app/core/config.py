@@ -1,8 +1,9 @@
+import os
 import secrets
 from typing import Literal
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     live_trading_enabled: bool = False
     frontend_url: str = "http://localhost:3000"
     app_password: SecretStr | None = None
-    jwt_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    jwt_secret: str = ""
     data_dir: Path = PROJECT_ROOT / "data"
     paper_starting_balance: int = 100000
     market_data_source: Literal["sample", "kotak"] = "sample"
@@ -35,12 +36,59 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     openai_backup_api_key: SecretStr | None = None
     gemini_backup_api_key: SecretStr | None = None
-    options_agent_provider: Literal['auto', 'gemini', 'openai'] = 'auto'
+    options_agent_provider: Literal['auto', 'gemini', 'openai', 'ollama'] = 'auto'
     options_agent_model: str | None = Field(default=None, min_length=1, max_length=128,
                                           pattern=r'^[A-Za-z0-9_.:-]+$')
     options_agent_enabled: bool = True
+    agent_input_token_estimate_limit: int = Field(default=24000, ge=1)
+    agent_context_token_limit: int = Field(default=32768, ge=1)
     options_mcp_port: int = Field(default=8766, ge=0, le=65535)
     external_mcp_config: Path = PROJECT_ROOT / 'mcp.json'
+
+    @model_validator(mode='after')
+    def _validate_agent_context(self):
+        if self.agent_input_token_estimate_limit + 4096 > self.agent_context_token_limit:
+            raise ValueError('Agent input estimate plus generation must fit context limit')
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_persistent_jwt_secret(self) -> "Settings":
+        if self.jwt_secret and self.jwt_secret.strip():
+            self.jwt_secret = self.jwt_secret.strip()
+            return self
+        secret_file = self.data_dir / ".jwt_secret"
+        try:
+            if secret_file.exists():
+                existing = secret_file.read_text(encoding="utf-8").strip()
+                if existing:
+                    self.jwt_secret = existing
+                    return self
+        except OSError:
+            pass
+        generated = secrets.token_urlsafe(32)
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, generated.encode("utf-8"))
+            finally:
+                os.close(fd)
+            try:
+                os.chmod(secret_file, 0o600)
+            except OSError:
+                pass
+        except FileExistsError:
+            try:
+                existing = secret_file.read_text(encoding="utf-8").strip()
+                if existing:
+                    self.jwt_secret = existing
+                    return self
+            except OSError:
+                pass
+        except OSError:
+            pass
+        self.jwt_secret = generated
+        return self
 
     model_config = SettingsConfigDict(
         env_file=(PROJECT_ROOT / ".env", PROJECT_ROOT / "backend" / ".env"),

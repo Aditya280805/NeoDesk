@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 def test_portfolio_offline_evaluation_uses_real_mcp_and_reports_no_model():
     from app.terminal.options_evals import portfolio_replay
-    with patch('app.terminal.options_evals.build_agent', side_effect=AssertionError('offline model call')):
+    with patch('app.terminal.specialist_agents.build_model', side_effect=AssertionError('offline model call')):
         report = asyncio.run(portfolio_replay('offline'))
     assert report['scope'] == 'portfolio'
     assert report['dataset_version'] == 'portfolio-evals.v1'

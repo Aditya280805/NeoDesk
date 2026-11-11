@@ -1,5 +1,6 @@
 """Account-scoped persistent storage. Money is stored in integer paise."""
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -130,6 +131,22 @@ class Store:
                 db.execute('DROP TABLE orders')
                 db.execute('ALTER TABLE orders_scoped RENAME TO orders')
                 db.execute('CREATE INDEX idx_orders_user ON orders(user_id)')
+
+            # Remove legacy single-user CHECK (id = 1) constraint on account table without losing rows.
+            acc_sql_row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='account'").fetchone()
+            acc_sql = acc_sql_row[0] if acc_sql_row and acc_sql_row[0] else ''
+            if re.search(r'\bCHECK\s*\(', acc_sql, re.IGNORECASE):
+                db.execute('''CREATE TABLE account_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE DEFAULT 1,
+                    initial INTEGER, cash INTEGER, realized INTEGER DEFAULT 0)''')
+                acc_cols = {r[1] for r in db.execute('PRAGMA table_info(account)').fetchall()}
+                user_expr = 'COALESCE(user_id, 1)' if 'user_id' in acc_cols else '1'
+                realized_expr = 'COALESCE(realized, 0)' if 'realized' in acc_cols else '0'
+                db.execute(f'''INSERT INTO account_v2 (id, user_id, initial, cash, realized)
+                               SELECT id, {user_expr}, initial, cash, {realized_expr} FROM account''')
+                db.execute('DROP TABLE account')
+                db.execute('ALTER TABLE account_v2 RENAME TO account')
+                db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_account_user ON account(user_id)')
 
             db.execute("INSERT OR IGNORE INTO account(id, user_id, initial, cash) VALUES (1, 1, ?, ?)", (balance * 100, balance * 100))
             if not db.execute("SELECT 1 FROM metadata WHERE key='catalogue_v2'").fetchone():

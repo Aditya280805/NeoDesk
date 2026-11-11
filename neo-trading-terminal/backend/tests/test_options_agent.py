@@ -13,6 +13,8 @@ from app.auth.router import _clear_rate_limits
 from app.brokers.base_broker import BrokerError
 from app.core.config import Settings
 from app.terminal import options_agent as module
+from app.terminal.agent_registry import AGENT_REGISTRY
+from app.terminal import specialist_agents
 from app.terminal.options_agent import OptionsContext, normalize_snapshot
 from app.terminal.server import create_app
 
@@ -33,11 +35,13 @@ def app(tmp_path, monkeypatch):
                                 app_password=None, kotak_consumer_key=None,
                                 openai_api_key=SecretStr('test-key'), options_mcp_port=0))
     monkeypatch.setattr(result.state.market, 'call', Mock(return_value=chain()))
-    def agent(config, snapshot, tools):
+    def agent(config, snapshot, tools, *, scope=None):
         return SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={
             'answer': 'Partial-chain put/call ratio is 1.5. Exchange freshness is unverified.',
             'snapshot_ids': [snapshot['snapshot_id']]})))
-    monkeypatch.setattr(module, 'build_agent', Mock(side_effect=agent))
+    mock_chain_agent = Mock(side_effect=agent)
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', mock_chain_agent)
+    result.state.mock_chain_agent = mock_chain_agent
     return result
 
 
@@ -84,7 +88,7 @@ def test_no_broker_data_never_calls_model(client, app):
     app.state.market.call.side_effect = BrokerError('Connect Kotak in Connections.')
     response = client.post('/api/options-agent/chat', json={'message': 'Summarize options'})
     assert response.status_code == 503
-    module.build_agent.assert_not_called()
+    app.state.mock_chain_agent.assert_not_called()
     assert app.state.options_agent.active == set()
 
 
@@ -93,7 +97,7 @@ def test_missing_key_has_explicit_status_and_snapshot_still_works(client, app):
     assert client.get('/api/options-agent/status').json()['configured'] is False
     assert client.post('/api/options-agent/chat', json={'message': 'hello'}).status_code == 503
     assert client.post('/api/options-agent/snapshot', json={}).status_code == 200
-    module.build_agent.assert_not_called()
+    app.state.mock_chain_agent.assert_not_called()
 
 
 def test_chat_history_evidence_and_context_boundary(client, app):
@@ -143,8 +147,9 @@ def test_agent_routes_require_authentication(app):
         assert c.post('/api/options-agent/chat', json={'message': 'hello'}).status_code == 401
 
 
-def test_provider_error_is_redacted_and_no_failed_turn_is_saved(client, app):
-    module.build_agent.side_effect = RuntimeError('secret=test-key')
+def test_provider_error_is_redacted_and_no_failed_turn_is_saved(client, app, monkeypatch):
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *a, **kw:
+        SimpleNamespace(arun=AsyncMock(side_effect=RuntimeError('secret=test-key'))))
     response = client.post('/api/options-agent/chat', json={'message': 'Summarize'})
     assert response.status_code == 503 and 'test-key' not in response.text
     assert app.state.options_agent.active == set()
@@ -152,10 +157,10 @@ def test_provider_error_is_redacted_and_no_failed_turn_is_saved(client, app):
         assert db.execute('SELECT count(*) FROM option_chat_turns').fetchone()[0] == 0
 
 
-def test_agno_error_run_is_not_treated_as_an_answer(client):
+def test_agno_error_run_is_not_treated_as_an_answer(client, monkeypatch):
     from agno.run.base import RunStatus
-    module.build_agent.side_effect = lambda *args: SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(
-        status=RunStatus.error, content='Provider failure details must not be saved.')))
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *a, **kw: SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(
+        status=RunStatus.error, content='Provider failure details must not be saved.'))))
     response = client.post('/api/options-agent/chat', json={'message': 'Summarize'})
     assert response.status_code == 503
     assert 'Provider failure details' not in response.text

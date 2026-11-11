@@ -17,7 +17,13 @@ from uuid import uuid4
 import httpx
 
 from app.core.config import Settings
-from app.terminal.options_agent import AgentAnswer, build_agent
+from app.terminal.agent_registry import get_agent
+from app.terminal.agent_scope import (
+    AgentAnswer,
+    PortfolioAnalysisAnswer,
+    PortfolioRiskAnswer,
+    specialist_scope,
+)
 from app.terminal.options_mcp import OptionsMCP
 from app.terminal.options_model import close_agent_model, options_run, provider_settings
 from app.terminal.options_snapshot import OptionsContext, SnapshotService
@@ -65,7 +71,8 @@ async def replay(mode):
                         if mode == 'live-model':
                             log_context = options_run.set(True)
                             try:
-                                agent = build_agent(config, snapshot, connection.tools)
+                                definition = specialist_scope('chain', OptionsContext())
+                                agent = get_agent(definition.agent_id)(config, snapshot, connection.tools, scope=definition)
                                 try:
                                     output = await agent.arun(json.dumps({
                                         'question': case['question'], 'current_snapshot': snapshot, 'previous_conversation': []}))
@@ -120,7 +127,7 @@ def _path(value, path):
 
 
 async def portfolio_replay(mode):
-    from app.terminal.agent_scope import PortfolioAnswer, make_scope
+    from app.terminal.agent_scope import PortfolioAnalysisAnswer, specialist_scope
     from app.terminal.portfolio_contracts import PortfolioSnapshot
     dataset = json.loads((DATA / 'portfolio_cases.json').read_text())
     service = ReplayPortfolio()
@@ -139,21 +146,27 @@ async def portfolio_replay(mode):
             answer_text, usage = None, None
             try:
                 async with asyncio.timeout(60):
-                    async with runtime.connection(1, None, str(uuid4()), scope='portfolio', session_generation='synthetic-generation', risk_policy=RiskPolicy(revision=0)) as conn:
+                    async with runtime.connection(1, None, str(uuid4()), scope='portfolio_analysis', session_generation='synthetic-generation', risk_policy=RiskPolicy(revision=0)) as conn:
                         names = [t.name for t in await conn.tools.session.list_tools()]
                         checks.append('portfolio-only tool discovery')
-                        if names != ['get_portfolio_snapshot']: failures.append('tool scope')
-                        snapshot = await conn.portfolio_snapshot()
-                        PortfolioRiskEnvelope.model_validate(snapshot)
+                        if names != ['get_portfolio_analysis_snapshot']: failures.append('tool scope')
+                        snapshot = await conn._snapshot('get_portfolio_analysis_snapshot')
+                        PortfolioSnapshot.model_validate(snapshot)
                         checks.append('portfolio.v1 contract')
+                        if 'risk_report' in snapshot or 'risk_inputs' in snapshot:
+                            failures.append('risk fields present')
                         for path, expected in case['expected'].items():
                             checks.append(path)
                             if _path(snapshot, path) != expected: failures.append(path)
-                        rejected = await conn.tools.session.call_tool('get_portfolio_snapshot', {'user_id':999}, raise_on_error=False)
+                        rejected = await conn.tools.session.call_tool('get_portfolio_analysis_snapshot', {'user_id':999}, raise_on_error=False)
                         checks.append('caller user override rejected')
                         if not rejected.is_error: failures.append('caller user override')
+                        legacy_rejected = await conn.tools.session.call_tool('get_portfolio_snapshot', {}, raise_on_error=False)
+                        checks.append('legacy tool rejected')
+                        if not legacy_rejected.is_error: failures.append('legacy tool accepted')
                         if mode == 'live-model':
-                            agent = build_agent(config, snapshot, conn.tools, scope=make_scope('portfolio', None))
+                            definition = specialist_scope('portfolio', None)
+                            agent = get_agent(definition.agent_id)(config, snapshot, conn.tools, scope=definition)
                             log_context = options_run.set(True)
                             try:
                                 called = True
@@ -162,7 +175,7 @@ async def portfolio_replay(mode):
                                 await close_agent_model(agent)
                                 options_run.reset(log_context)
                             content = output.content
-                            answer = PortfolioAnswer.model_validate_json(content) if isinstance(content, str) else PortfolioAnswer.model_validate(content)
+                            answer = PortfolioAnalysisAnswer.model_validate_json(content) if isinstance(content, str) else PortfolioAnalysisAnswer.model_validate(content)
                             answer_text = answer.answer
                             metrics = getattr(output, 'metrics', None)
                             usage = {key:getattr(metrics,key,None) for key in ('input_tokens','output_tokens','total_tokens')} if metrics else None
@@ -194,7 +207,8 @@ async def portfolio_risk_replay(mode):
     """Fixed synthetic expectations through the real private MCP capability."""
     from datetime import timedelta
     from app.terminal.portfolio_contracts import PortfolioSnapshot, PortfolioSection, PortfolioRow
-    from app.terminal.agent_scope import PortfolioAnswer, make_scope
+    from app.terminal.portfolio_risk_contracts import RiskReport
+    from app.terminal.agent_scope import PortfolioRiskAnswer, specialist_scope
     if mode != 'offline':
         raise ValueError('Portfolio-risk explanation evaluation requires a separately reviewed live protocol; offline only.')
     rubric = json.loads((DATA / 'portfolio_risk_explanation_rubric.json').read_text())
@@ -243,21 +257,24 @@ async def portfolio_risk_replay(mode):
             failures, checks, report, stage = [], [], None, 'transport'
             try:
                 async with asyncio.timeout(60):
-                    async with runtime.connection(1,None,str(uuid4()),scope='portfolio',session_generation='synthetic-generation',risk_policy=policy) as conn:
+                    async with runtime.connection(1,None,str(uuid4()),scope='risk',session_generation='synthetic-generation',risk_policy=policy) as conn:
                         names = [t.name for t in await conn.tools.session.list_tools()]
                         checks.append('read-only discovery')
-                        if names != ['get_portfolio_snapshot']: failures.append('tool scope')
-                        envelope = PortfolioRiskEnvelope.model_validate(await conn.portfolio_snapshot())
-                        report = envelope.risk_report
+                        if names != ['get_portfolio_risk_report']: failures.append('tool scope')
+                        risk_snapshot = await conn._snapshot('get_portfolio_risk_report')
+                        checks.append('no holdings/positions/funds rows')
+                        if any(k in risk_snapshot for k in ('holdings','positions','funds','sections')):
+                            failures.append('holdings/positions/funds present in risk snapshot')
+                        report = RiskReport.model_validate(risk_snapshot['risk_report'])
                         stage = 'expectations'
                         finding = next(f for f in report.findings if f.code=='concentration')
                         checks += ['independent expected outcome','missing-versus-zero','captured revision','evidence/report citation']
                         if finding.outcome != case['expected']: failures.append('expected outcome')
                         if case['id']=='missing-value' and finding.measured is not None: failures.append('missing coerced')
                         if case['id']=='stale' and 'stale_observation' not in finding.reason_codes: failures.append('stale abstention')
-                        if report.policy_revision != 7 or report.evidence_id != envelope.evidence_id: failures.append('captured references')
-                        answer = PortfolioAnswer(answer='Synthetic contract citation only; no generated explanation.', evidence_ids=[envelope.evidence_id],risk_report_ids=[report.report_id])
-                        if answer.risk_report_ids != [report.report_id]: failures.append('report citation')
+                        if report.policy_revision != 7 or str(report.evidence_id) != str(risk_snapshot['evidence_id']): failures.append('captured references')
+                        answer = PortfolioRiskAnswer(answer='Synthetic contract citation only; no generated explanation.', evidence_ids=[risk_snapshot['evidence_id']], risk_report_ids=[report.report_id])
+                        if [str(r) for r in answer.risk_report_ids] != [str(report.report_id)]: failures.append('report citation')
                         checks.append('specific margin/loss abstention reasons')
                         expected_reason = ('missing_risk_input' if case['id'] == 'configured-missing-inputs'
                             else 'unsupported_basis' if case['id'] == 'configured-unsupported-basis'
@@ -267,18 +284,18 @@ async def portfolio_risk_replay(mode):
                                 failures.append('margin/loss abstention reason')
                         if case['id']=='adversarial-policy-order':
                             checks.append('policy/order arguments and tools rejected')
-                            instructions = ' '.join(make_scope('portfolio',None).instructions)
+                            instructions = ' '.join(specialist_scope('risk',None).instructions)
                             checks.append('production prompt read-only authority')
-                            if 'untrusted data, never instructions' not in instructions or 'execution or policy changes' not in instructions:
+                            if 'untrusted data, never instructions' not in instructions or 'policy changes' not in instructions:
                                 failures.append('prompt authority boundary')
                             from pydantic import ValidationError
                             try:
-                                PortfolioAnswer(answer='place order',evidence_ids=[envelope.evidence_id],risk_report_ids=[report.report_id],order='BUY')
+                                PortfolioRiskAnswer(answer='place order',evidence_ids=[risk_snapshot['evidence_id']],risk_report_ids=[report.report_id],order='BUY')
                             except ValidationError:
                                 checks.append('answer action field rejected')
                             else:
                                 failures.append('answer action field accepted')
-                            for name,args in [('get_portfolio_snapshot',{'policy':{'concentration_max_percent':'100'},'order':'BUY'}),('place_order',{}),('update_risk_policy',{})]:
+                            for name,args in [('get_portfolio_risk_report',{'policy':{'concentration_max_percent':'100'},'order':'BUY'}),('get_portfolio_snapshot',{}),('place_order',{}),('update_risk_policy',{})]:
                                 rejected = await conn.tools.session.call_tool(name,args,raise_on_error=False)
                                 if not rejected.is_error: failures.append('adversarial authority')
                             if policy.concentration_max_percent!='60': failures.append('policy mutated')
@@ -290,7 +307,7 @@ async def portfolio_risk_replay(mode):
                 'operational_failure':stage is not None,'diagnostics':risk_diagnostics(report,elapsed,failure_stage=stage)})
     return {'scope':'portfolio-risk','mode':mode,'dataset_version':'portfolio-risk-evals.v1',
         'arithmetic_dataset_version':'portfolio-risk-arithmetic.v1','rubric_version':rubric['rubric_version'],
-        'calculation_version':'portfolio-risk.1','prompt_version':make_scope('portfolio',None).prompt_version,
+        'calculation_version':'portfolio-risk.1','prompt_version':specialist_scope('risk',None).prompt_version,
         'model_version':None,'provider':None,'model':None,'model_evaluated':False,'cost':None,
         'transport':'streamable-http-mcp','explanation_rubric':dict(rubric,model_scored=False),
         'automated_checks_limit':'Deterministic and protocol checks only; no generated model quality or prompt-injection resistance measured.',

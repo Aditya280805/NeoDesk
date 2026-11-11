@@ -14,6 +14,17 @@ function load(file, dependencies, globals) {
   return module.exports
 }
 
+test('API preserves structured scope conflicts for callers', async () => {
+  const { api } = load('lib/api.ts', {}, {
+    process: { env: {} }, AbortSignal: { timeout: () => undefined },
+    fetch: async () => ({ ok: false, status: 409, json: async () => ({
+      detail: { code: 'conversation_scope_changed', message: 'Start a new chat.' },
+    }) }),
+  })
+  await assert.rejects(api('/options-agent/chat'), error =>
+    error.status === 409 && error.code === 'conversation_scope_changed' && error.message === 'Start a new chat.')
+})
+
 test('an old socket closing cannot disconnect the new signed-in session', () => {
   const sockets = [], states = []
   class Socket {
