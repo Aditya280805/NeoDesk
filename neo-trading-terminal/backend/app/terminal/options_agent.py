@@ -23,6 +23,7 @@ from app.terminal.agent_harness import RequestHarness, harness_context, current_
 from app.terminal.agent_scope import specialist_scope
 from app.terminal.agent_registry import get_agent
 from app.terminal import specialist_agents  # register fresh specialist factories
+from app.terminal import unified_chat  # register master_router factory
 
 PROMPT_VERSION = '2'
 logger = logging.getLogger(__name__)
@@ -440,6 +441,8 @@ class OptionsAgent:
                         if [str(x) for x in answer.risk_report_ids] != [snapshot['risk_report']['report_id']]:
                             raise ValueError('Invalid risk report citation')
                         references = [str(x) for x in answer.evidence_ids]
+                    else:
+                        raise ValueError(f'Unsupported scope: {scope}')
                     metrics = getattr(result, 'metrics', None)
                     detail['tokens'] = {k: getattr(metrics, k, None) for k in ('input_tokens', 'output_tokens', 'reasoning_tokens', 'total_tokens')}
                 detail['stages'].append('publication')
