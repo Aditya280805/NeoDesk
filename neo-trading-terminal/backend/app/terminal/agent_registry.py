@@ -26,7 +26,7 @@ def register_agent(name: str):
 
     The original function is preserved as ``fn.__wrapped__`` so that
     tests can access it directly when monkeypatching the module-level
-    ``build_agent`` reference.
+    factory reference.
     """
     def decorator(fn: Callable[..., Agent | Team]) -> Callable[..., Agent | Team]:
         if name in AGENT_REGISTRY:

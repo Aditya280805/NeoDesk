@@ -221,7 +221,7 @@ def test_real_provider_serialization_portfolio(client,app,monkeypatch,provider):
         asyncio.run(sdk.aio.aclose());sdk.close()
     else: asyncio.run(sdk.close())
 
-REAL_BUILD_AGENT=specialist_agents.build_portfolio_analysis_agent
+REAL_PORTFOLIO_FACTORY=specialist_agents.build_portfolio_analysis_agent
 
 
 

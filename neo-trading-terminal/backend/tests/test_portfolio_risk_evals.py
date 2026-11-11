@@ -4,9 +4,10 @@ from app.terminal import options_evals
 
 
 def test_risk_replay_versions_checks_and_sanitized_diagnostics(monkeypatch):
+    from app.terminal import specialist_agents
     def forbidden_model(*args, **kwargs):
         raise AssertionError("offline model call")
-    monkeypatch.setattr(options_evals, "build_agent", forbidden_model)
+    monkeypatch.setattr(specialist_agents, "build_model", forbidden_model)
     report = asyncio.run(options_evals.portfolio_risk_replay('offline'))
     assert report['total'] == report['passed'] == 11
     assert report['model_evaluated'] is False and report['cost'] is None
@@ -33,7 +34,8 @@ def test_risk_diagnostics_failure_is_operational_and_sanitized():
     assert trace['report_id'] is None
 
 def test_risk_offline_does_not_call_model(monkeypatch):
-    monkeypatch.setattr(options_evals, 'build_agent', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model called')))
+    from app.terminal import specialist_agents
+    monkeypatch.setattr(specialist_agents, 'build_model', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model called')))
     # Mode rejection happens before any network/model call.
     import pytest
     with pytest.raises(ValueError, match='offline only'):

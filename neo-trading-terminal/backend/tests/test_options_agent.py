@@ -41,7 +41,6 @@ def app(tmp_path, monkeypatch):
             'snapshot_ids': [snapshot['snapshot_id']]})))
     mock_chain_agent = Mock(side_effect=agent)
     monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', mock_chain_agent)
-    monkeypatch.setattr(module, 'build_agent', mock_chain_agent)
     result.state.mock_chain_agent = mock_chain_agent
     return result
 

@@ -10,7 +10,6 @@ from pydantic import SecretStr
 from app.core.config import Settings
 from app.terminal.server import create_app
 from app.auth.router import _clear_rate_limits
-from app.terminal.options_agent import build_agent
 from app.terminal.options_snapshot import OptionsContext, normalize_snapshot
 from test_options_agent import chain
 

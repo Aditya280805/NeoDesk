@@ -284,7 +284,7 @@ async def dispatch_unified(service, user_id, body):
                         previous_user_questions=previous_user_questions,
                         harness=harness,
                     )
-                except HTTPException:
+                except (HTTPException, TimeoutError):
                     raise
                 except Exception as error:
                     reason = error.code if isinstance(error, HarnessError) else 'routing_failed'
@@ -350,11 +350,12 @@ async def dispatch_unified(service, user_id, body):
         persist_parent('cancelled', 'cancelled')
         raise
     except HTTPException as error:
-        persist_parent('failed', 'specialist_failed')
+        reason = 'specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed'
+        persist_parent('failed', reason)
         error.headers = {**(error.headers or {}), 'X-Options-Run-Id': parent_run_id}
         raise
     except Exception as error:
-        reason = error.code if isinstance(error, HarnessError) else 'routing_failed'
+        reason = error.code if isinstance(error, HarnessError) else ('specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed')
         persist_parent('failed', reason)
         raise HTTPException(503, 'Unable to route your question. Please retry or use a specific options or portfolio chat.', headers={'X-Options-Run-Id': parent_run_id}) from None
     finally:

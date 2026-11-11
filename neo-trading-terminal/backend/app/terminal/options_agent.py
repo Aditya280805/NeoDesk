@@ -29,19 +29,6 @@ PROMPT_VERSION = '2'
 logger = logging.getLogger(__name__)
 
 
-@register_agent('options_monitor')
-def build_agent(config, snapshot, tools, *, scope=None):
-    from agno.agent import Agent
-    definition = scope or make_scope('chain', OptionsContext())
-    if definition.scope != 'portfolio':
-        return get_agent(definition.agent_id)(config, snapshot,
-            tools if isinstance(tools, list) else [tools], scope=definition)
-    return Agent(
-        name='NeoDesk Options Monitor', model=build_model(config),
-        tools=tools if isinstance(tools, list) else [tools], tool_call_limit=2, output_schema=definition.output_contract,
-        telemetry=False, markdown=False, instructions=list(definition.instructions))
-
-
 class OptionsAgent:
     deadline_seconds = 60
 
