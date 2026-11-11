@@ -35,7 +35,6 @@ from app.terminal.options_model import provider_settings, close_agent_model, opt
 from app.terminal.options_snapshot import OptionsContext, SnapshotService
 from app.terminal.portfolio_contracts import PortfolioSnapshot, PortfolioSection, PortfolioRow
 from app.terminal.portfolio_risk_contracts import RiskPolicy, RiskReport
-from app.terminal.portfolio_risk_diagnostics import risk_diagnostics
 from app.terminal.unified_chat import (
     dispatch_unified,
     route_question,

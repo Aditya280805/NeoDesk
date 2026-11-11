@@ -204,6 +204,8 @@ async def dispatch_unified(service, user_id, body):
     if body.conversation_id is not None:
         if hasattr(service, 'history'):
             history = service.history(user_id, body.conversation_id)
+            if not history:
+                raise HTTPException(404, 'Conversation not found.')
         elif hasattr(service, 'store') and service.store:
             with service.store.connect() as db:
                 row = db.execute(

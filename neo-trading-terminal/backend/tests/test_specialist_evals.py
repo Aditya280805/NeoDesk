@@ -325,8 +325,8 @@ def test_frozen_fixtures_and_handoff_sentinel_and_secret_scan():
         for pat in forbidden_patterns:
             assert pat not in text, f"Forbidden pattern '{pat}' found in fixture {p.name}"
 
-    if handoff_file.exists():
-        text = handoff_file.read_text(encoding='utf-8')
-        for pat in ['SECRET_SENTINEL', 'test-key', 'Bearer ey']:
-            assert pat not in text, f"Forbidden pattern '{pat}' found in handoff doc"
+    assert handoff_file.is_file(), f"Handoff doc missing: {handoff_file}"
+    text = handoff_file.read_text(encoding='utf-8')
+    for pat in ['SECRET_SENTINEL', 'test-key', 'Bearer ey', 'sk-', 'AIza', 'PRIVATE KEY']:
+        assert pat not in text, f"Forbidden pattern '{pat}' found in handoff doc"
 

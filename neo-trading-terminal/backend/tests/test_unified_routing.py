@@ -260,3 +260,21 @@ def test_endpoint_requires_user_and_dispatches_with_signed_in_identity(tmp_path,
         response = client.post('/api/options-agent/unified-chat', json={'message':'hello'})
         assert response.status_code == 200
         assert dispatch.await_args.args[1] == registration.json()['user']['id']
+
+
+def test_dispatch_unified_history_returns_none_fails_closed_404():
+    from uuid import uuid4
+    from app.terminal.unified_chat import UnifiedChatRequest, dispatch_unified
+    service = SimpleNamespace(
+        config=None,
+        history=Mock(return_value=None),
+        chat=AsyncMock(),
+        portfolio_chat=AsyncMock(),
+    )
+    req = UnifiedChatRequest(message='Check exposure', conversation_id=uuid4())
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(dispatch_unified(service, 42, req))
+    assert excinfo.value.status_code == 404
+    assert 'Conversation not found' in str(excinfo.value.detail)
+    service.chat.assert_not_awaited()
+    service.portfolio_chat.assert_not_awaited()
