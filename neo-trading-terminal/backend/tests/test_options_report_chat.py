@@ -22,13 +22,13 @@ def seed(app,kind,owner=1):
 
 @pytest.mark.parametrize('kind',['strategy','scan','alert','backtest'])
 def test_authenticated_explain_and_immutable_owner_history(client,app,monkeypatch,kind):
-    from app.terminal import options_agent as module
+    from app.terminal.agent_registry import AGENT_REGISTRY
     id=seed(app,kind)
     def build(config,snapshot,tools,*,scope):
         assert scope.allowed_tool==f'get_{kind}_report'
         assert scope.stored_context=={'scope':kind,'report_id':id}
         return SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={'answer':'Historical observation age is 305 days; theoretical analysis is not recommendation eligibility.', 'report_ids':[id],'evidence_ids':['exact-evidence']})))
-    monkeypatch.setattr(module,'build_agent',build)
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', build)
     response=client.post('/api/options-platform/explain',json={'report_kind':kind,'report_id':id,'message':'Explain'})
     assert response.status_code==200,response.text
     data=response.json()
@@ -43,25 +43,24 @@ def test_authenticated_explain_and_immutable_owner_history(client,app,monkeypatc
     assert client.post('/api/options-platform/explain',json={'report_kind':kind,'report_id':different,'message':'Explain','conversation_id':data['conversation_id']}).status_code==409
 
 def test_citation_failure_never_persists(client,app,monkeypatch):
-    from app.terminal import options_agent as module
+    from app.terminal.agent_registry import AGENT_REGISTRY
     id=seed(app,'scan')
-    monkeypatch.setattr(module,'build_agent',lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={'answer':'Invented', 'report_ids':[id],'evidence_ids':['wrong']}))))
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *a,**kw:SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={'answer':'Invented', 'report_ids':[id],'evidence_ids':['wrong']}))))
     response=client.post('/api/options-platform/explain',json={'report_kind':'scan','report_id':id,'message':'Explain'})
     assert response.status_code==503
     with app.state.store.connect() as db:
         assert db.execute('SELECT count(*) FROM option_chat_turns').fetchone()[0]==0
 
 def test_missing_report_does_not_invoke_model(client,app):
-    from app.terminal import options_agent as module
     assert client.post('/api/options-platform/explain',json={'report_kind':'scan','report_id':str(uuid4()),'message':'Explain'}).status_code==404
-    module.build_agent.assert_not_called()
+    app.state.mock_chain_agent.assert_not_called()
 
 def test_cancelled_explanation_has_no_successful_history(client,app,monkeypatch):
-    from app.terminal import options_agent as module
+    from app.terminal.agent_registry import AGENT_REGISTRY
     from app.terminal.agent_scope import ReportChatRequest
     id=seed(app,'scan')
     async def cancel(*args):raise asyncio.CancelledError()
-    monkeypatch.setattr(module,'build_agent',lambda *a,**kw:SimpleNamespace(arun=cancel))
+    monkeypatch.setitem(AGENT_REGISTRY, 'options_trading_analysis', lambda *a,**kw:SimpleNamespace(arun=cancel))
     async def run():
         with pytest.raises(asyncio.CancelledError):
             await app.state.options_agent.explain_report(1,ReportChatRequest(report_kind='scan',report_id=id,message='Explain'))
@@ -154,7 +153,7 @@ def test_initial_selection_admitted_and_cancel_retains_capacity(client,app,monke
             with pytest.raises(HTTPException) as error:
                 await service.explain_report(1,body)
             assert error.value.status_code==409
-            module.build_agent.assert_not_called()
+            app.state.mock_chain_agent.assert_not_called()
         finally:
             release.set()
             task.cancel()
@@ -185,7 +184,7 @@ def test_initial_selection_uses_overall_deadline(client,app,monkeypatch):
                 await asyncio.wait_for(service.explain_report(1,ReportChatRequest(report_kind='scan',report_id=id,message='Explain')),0.5)
             assert error.value.status_code==504
             assert entered.is_set() and 1 in service.active
-            module.build_agent.assert_not_called()
+            app.state.mock_chain_agent.assert_not_called()
         finally:
             release.set()
             workers=set(service.workers.get(1,()))

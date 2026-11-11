@@ -57,6 +57,11 @@ async def portfolio_chat(request: Request, body: PortfolioChatRequest):
     return await request.app.state.options_agent.portfolio_chat(get_user_id(request), body)
 
 
+@options_agent_router.post('/portfolio/risk/chat')
+async def portfolio_risk_chat(request: Request, body: PortfolioChatRequest):
+    return await request.app.state.options_agent.portfolio_risk_chat(get_user_id(request), body)
+
+
 from app.terminal.portfolio_risk_contracts import RiskPolicyUpdate
 from app.terminal.portfolio_risk_store import PolicyConflictError, RiskStoreBusyError
 

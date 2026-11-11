@@ -41,6 +41,7 @@ class Capability:
     snapshot_json: str | None = None
     selected_report: dict | None = None
     risk_diagnostic: dict | None = None
+    harness: object | None = field(default=None, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -146,6 +147,8 @@ class OptionsMCP:
                 if capability.deadline_monotonic <= time.monotonic():
                     raise ValueError('Request deadline expired')
             capability.calls += 1
+            if capability.harness:
+                capability.harness.read_tool()
             # One prefetch plus two model tool calls. Hard server-side bound.
             if capability.calls > 3:
                 raise ValueError('Tool budget exhausted')
@@ -305,7 +308,7 @@ class OptionsMCP:
                 sock.close()
 
     @asynccontextmanager
-    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None):
+    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None, harness=None):
         if not self.ready:
             raise HTTPException(503, 'Options monitoring is unavailable. The internal MCP service is not ready.')
         from agno.tools.mcp import MCPTools
@@ -320,6 +323,7 @@ class OptionsMCP:
         capability = Capability(user_id, context.model_copy(deep=True) if context is not None else None,
             run_id, time.monotonic() + 65, scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
             deadline_monotonic=deadline_monotonic if deadline_monotonic is not None else time.monotonic()+60)
+        capability.harness = harness
         if scope in ('strategy','scan','alert','backtest'):
             if context is not None or session_generation is not None or not selected_report or selected_report.get('report_kind') != scope:
                 raise ValueError('Captured selected report required')

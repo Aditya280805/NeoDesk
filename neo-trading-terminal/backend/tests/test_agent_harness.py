@@ -3,6 +3,14 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def test_context_estimator_ignores_sdk_runtime_timers():
+    from agno.models.message import Message
+    from app.terminal.agent_harness import estimate_tokens
+    message = Message(role='assistant', content='test')
+    message.metrics.start_timer()
+    assert estimate_tokens([message]) > 0
+
 def test_attempts_and_unknown_usage_are_shared_across_models():
     from app.terminal.agent_harness import RequestHarness, harness_context, bounded_invoke, HarnessError
     async def scenario():

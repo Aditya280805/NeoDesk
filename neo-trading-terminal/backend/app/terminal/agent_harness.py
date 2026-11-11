@@ -17,6 +17,9 @@ class HarnessError(ValueError):
 def estimate_tokens(value):
     """Conservative UTF-8 byte estimate, not provider tokenizer usage."""
     def encode(obj):
+        from agno.models.message import Message
+        if isinstance(obj, Message):
+            return obj.model_dump(mode='json', exclude_none=True, exclude={'metrics', 'references'})
         if hasattr(obj, 'model_dump'):
             return obj.model_dump(mode='json', exclude_none=True)
         raise TypeError('Unsupported context object')
@@ -55,6 +58,10 @@ class RequestHarness:
     def __post_init__(self):
         if self.deadline is None:
             self.deadline = time.monotonic() + (85 if self.auto else 60)
+
+    @property
+    def deadline_monotonic(self):
+        return self.deadline
 
     def check_deadline(self):
         remaining = self.deadline - time.monotonic()

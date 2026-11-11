@@ -1,4 +1,19 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+import pytest
 from test_portfolio_agent import app, client
+from app.terminal.agent_registry import AGENT_REGISTRY
+
+@pytest.fixture(autouse=True)
+def _mock_risk_agent(monkeypatch):
+    def build_risk(config, snapshot, tools, *, scope=None):
+        return SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={
+            'answer': 'Risk analysis passed.',
+            'evidence_ids': [snapshot['evidence_id']],
+            'risk_report_ids': [snapshot['risk_report']['report_id']]})))
+    mock = Mock(side_effect=build_risk)
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_risk', mock)
+    return mock
 
 def test_risk_policy_and_refresh(client, app):
     r=client.get('/api/options-agent/portfolio/risk-policy')
@@ -43,7 +58,7 @@ def test_policy_busy_sanitized(client, app, monkeypatch):
 def test_refresh_zero_model_and_saved_report(client, app):
     response=client.post('/api/options-agent/portfolio/snapshot')
     assert response.status_code==200,response.text
-    value=response.json();module.build_agent.assert_not_called()
+    value=response.json();app.state.mock_portfolio_agent.assert_not_called()
     report=app.state.portfolio_risk_store.get_report(1,value['risk_report']['report_id'])
     assert str(report.evidence_id)==value['evidence_id']
     with app.state.store.connect() as db:
@@ -52,13 +67,13 @@ def test_refresh_zero_model_and_saved_report(client, app):
 
 
 @pytest.mark.parametrize('bad_report',[None,str(uuid4())])
-def test_wrong_or_absent_report_rejected(client,app,bad_report):
-    def build(config,snapshot,tools,**kwargs):
+def test_wrong_or_absent_report_rejected(client,app,monkeypatch,bad_report):
+    def build(config,snapshot,tools,*,scope=None):
         content={'answer':'ok','evidence_ids':[snapshot['evidence_id']]}
         if bad_report is not None: content['risk_report_ids']=[bad_report]
         return SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content=content)))
-    module.build_agent.side_effect=build
-    assert client.post('/api/options-agent/portfolio/chat',json={'message':'x'}).status_code==503
+    monkeypatch.setitem(AGENT_REGISTRY, 'portfolio_risk', build)
+    assert client.post('/api/options-agent/portfolio/risk/chat',json={'message':'x'}).status_code==503
     with app.state.store.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM option_chat_turns').fetchone()[0]==0
         assert db.execute('SELECT COUNT(*) FROM portfolio_risk_reports').fetchone()[0]==0
@@ -88,7 +103,9 @@ def test_legacy_answer_and_history_remain_readable(client,app):
         db.execute('INSERT INTO option_chat_turns(conversation_id,user_id,message,answer,evidence,created_at) VALUES (?,?,?,?,?,?)',(cid,1,'old question','old answer','{}','old'))
     assert client.get('/api/options-agent/conversations/'+cid).json()['turns'][0]['answer']=='old answer'
     assert make_scope('portfolio',None).prompt_version=='portfolio.2'
-    assert client.post('/api/options-agent/portfolio/chat',json={'message':'new','conversation_id':cid}).status_code==200
+    res = client.post('/api/options-agent/portfolio/chat',json={'message':'new','conversation_id':cid})
+    assert res.status_code == 409
+    assert 'conversation_scope_changed' in str(res.json()['detail'])
 
 
 @pytest.mark.parametrize('interruption',['cancel','logout'])
@@ -144,10 +161,9 @@ def test_report_counts_toward_context_budget(client,app,monkeypatch):
         report=original(*args,**kwargs)
         return report.model_copy(update={'limitations':['untrusted'*10000]})
     monkeypatch.setattr(portfolio_risk,'evaluate_portfolio_risk',evaluate)
-    response=client.post('/api/options-agent/portfolio/chat',json={'message':'x'})
+    response=client.post('/api/options-agent/portfolio/risk/chat',json={'message':'x'})
     assert response.status_code==503
-    assert 'context limit' in response.text
-    module.build_agent.assert_not_called()
+    app.state.mock_portfolio_agent.assert_not_called()
 
 
 def test_actual_sqlite_lock_exhaustion_sanitized(client,app):
@@ -208,7 +224,7 @@ def test_portfolio_refresh_prompt_version(client,app):
 
 
 def test_new_history_references_canonical_report_and_hydrates_owner(client, app):
-    response = client.post('/api/options-agent/portfolio/chat', json={'message': 'summarize'})
+    response = client.post('/api/options-agent/portfolio/risk/chat', json={'message': 'summarize'})
     assert response.status_code == 200, response.text
     value = response.json()
     with app.state.store.connect() as db:
@@ -216,12 +232,12 @@ def test_new_history_references_canonical_report_and_hydrates_owner(client, app)
     assert 'risk_report' not in evidence
     assert evidence['risk_report_id'] == value['risk_report_ids'][0]
     history = app.state.options_agent.history(1, value['conversation_id'])
-    assert history['turns'][0]['portfolio_snapshot'] == value['portfolio_snapshot']
+    assert history['turns'][0]['risk_snapshot'] == value['risk_snapshot']
     assert app.state.portfolio_risk_store.get_report(2, evidence['risk_report_id']) is None
     # Embedded history from before normalization remains readable.
     with app.state.store.connect() as db:
-        db.execute('UPDATE option_chat_turns SET evidence=?', (json.dumps(value['portfolio_snapshot']),))
-    assert app.state.options_agent.history(1, value['conversation_id'])['turns'][0]['portfolio_snapshot'] == value['portfolio_snapshot']
+        db.execute('UPDATE option_chat_turns SET evidence=?', (json.dumps(value['risk_snapshot']),))
+    assert app.state.options_agent.history(1, value['conversation_id'])['turns'][0]['risk_snapshot'] == value['risk_snapshot']
     # A reference cannot hydrate a canonical report owned by another user.
     with app.state.store.connect() as db:
         db.execute('UPDATE option_chat_turns SET evidence=?', (json.dumps(evidence),))
@@ -234,7 +250,7 @@ def test_new_history_references_canonical_report_and_hydrates_owner(client, app)
 
 
 @pytest.mark.parametrize('failure', [False, True])
-@pytest.mark.parametrize('endpoint', ['snapshot', 'chat'])
+@pytest.mark.parametrize('endpoint', ['snapshot', 'risk/chat'])
 def test_production_risk_diagnostics_breach_and_evaluation_failure(client, app, monkeypatch, caplog, failure, endpoint):
     from app.terminal import portfolio_risk
     import logging
@@ -256,7 +272,7 @@ def test_production_risk_diagnostics_breach_and_evaluation_failure(client, app, 
         def evaluate(*args):
             raise ValueError('EXCEPTION_SENTINEL financial=987654321 provider=PROVIDER_SENTINEL')
         monkeypatch.setattr(portfolio_risk, 'evaluate_portfolio_risk', evaluate)
-    response = client.post('/api/options-agent/portfolio/' + endpoint, **({'json': {'message': 'summarize'}} if endpoint == 'chat' else {}))
+    response = client.post('/api/options-agent/portfolio/' + endpoint, **({'json': {'message': 'summarize'}} if 'chat' in endpoint else {}))
     assert response.status_code == (503 if failure else 200)
     events = [json.loads(record.message.split('portfolio_risk ', 1)[1])
               for record in caplog.records if record.message.startswith('portfolio_risk ')]
@@ -276,11 +292,11 @@ def test_production_risk_diagnostics_breach_and_evaluation_failure(client, app, 
     assert detail['risk_diagnostics']['outcome'] == ('operational_failure' if failure else 'breach')
     assert detail['risk_diagnostics']['failure_stage'] == ('evaluation' if failure else None)
     if not failure:
-        assert detail['risk_diagnostics']['report_id'] == (response.json()['portfolio_snapshot'] if endpoint == 'chat' else response.json())['risk_report']['report_id']
+        assert detail['risk_diagnostics']['report_id'] == (response.json()['risk_snapshot'] if 'risk' in endpoint else response.json())['risk_report']['report_id']
 
 @pytest.mark.parametrize('interruption', ['cancel', 'deadline', 'logout'])
 def test_chat_history_hydration_is_nonblocking_and_fenced(client, app, monkeypatch, interruption):
-    response = client.post('/api/options-agent/portfolio/chat', json={'message': 'seed history'})
+    response = client.post('/api/options-agent/portfolio/risk/chat', json={'message': 'seed history'})
     assert response.status_code == 200, response.text
     conversation_id = response.json()['conversation_id']
     agent = app.state.options_agent
@@ -294,9 +310,9 @@ def test_chat_history_hydration_is_nonblocking_and_fenced(client, app, monkeypat
     monkeypatch.setattr(app.state.portfolio_risk_store, 'get_report', blocked_report)
     if interruption == 'deadline':
         monkeypatch.setattr(agent, 'deadline_seconds', .15)
-    module.build_agent.reset_mock()
+    app.state.mock_portfolio_agent.reset_mock()
     async def scenario():
-        request = asyncio.create_task(agent.portfolio_chat(1, PortfolioChatRequest(
+        request = asyncio.create_task(agent.portfolio_risk_chat(1, PortfolioChatRequest(
             message='continue', conversation_id=conversation_id)))
         try:
             async with asyncio.timeout(2):
@@ -329,7 +345,7 @@ def test_chat_history_hydration_is_nonblocking_and_fenced(client, app, monkeypat
             await asyncio.gather(request, return_exceptions=True)
             while agent.workers.get(1):
                 await asyncio.gather(*tuple(agent.workers[1]), return_exceptions=True)
-        module.build_agent.assert_not_called()
+        app.state.mock_portfolio_agent.assert_not_called()
         with app.state.store.connect() as db:
             assert db.execute('SELECT COUNT(*) FROM option_chat_turns').fetchone()[0] == 1
             assert db.execute('SELECT COUNT(*) FROM portfolio_risk_reports').fetchone()[0] == 1

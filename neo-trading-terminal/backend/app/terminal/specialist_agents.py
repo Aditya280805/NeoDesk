@@ -13,11 +13,14 @@ def _build(agent_id, config, tools, scope):
     if scope.scope in ('strategy', 'scan', 'alert', 'backtest'):
         expected = report_scope(scope.scope, scope.stored_context['report_id'])
     else:
-        context = OptionsContext.model_validate(scope.stored_context) if scope.scope == 'chain' else None
+        context = OptionsContext(underlying=scope.stored_context.get('underlying', 'NIFTY'),
+                                 exchange=scope.stored_context.get('exchange', 'NSE'),
+                                 expiry=scope.stored_context.get('expiry')) if scope.scope == 'chain' else None
         expected = specialist_scope(scope.scope, context)
     if scope != expected:
         raise ValueError('Specialist contract does not match trusted scope')
-    return Agent(name=agent_id, model=build_model(config), tools=list(tools),
+    tool_list = list(tools) if isinstance(tools, (list, tuple)) else [tools]
+    return Agent(name=agent_id, model=build_model(config), tools=tool_list,
                  tool_call_limit=2, output_schema=scope.output_contract,
                  telemetry=False, markdown=False, instructions=list(scope.instructions))
 

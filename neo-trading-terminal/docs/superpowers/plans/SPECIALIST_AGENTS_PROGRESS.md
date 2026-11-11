@@ -13,8 +13,8 @@ Implementation is IN PROGRESS. Do not mark Part 1 complete or start Part 2.
 - Task 4: implemented server discovery/invocation matrix across all eight scopes, malformed-argument rejection, expiry/origin/revocation and no-router-capability checks. Added cancellation/capacity and cached session/deadline tests for both specialist scopes.
 - Task 5: harness primitives implemented in `agent_harness.py`: ContextVar parent/stage binding, 60/85-second deadlines, shared stage/parent attempt and generation reservations, context estimates/history trimming and three-read counter. Added validated context settings. Provider hooks added to OpenAI/Ollama and Gemini. Production request binding, admission consolidation and tool counter binding remain for Task 7.
 - Task 6: provider accounting and allowlisted numeric stage trace export implemented; Gemini reasoning included, missing usage conservatively reserves full allowance, cancellation accounted. Stage timing recorded. Run-record persistence, complete failure-code mapping and router/specialist publication remain for Tasks 7–8.
-- Tasks 7–10: pending. NEXT: read `options_agent.py` runner and `unified_chat.py`; integrate the new harness into admission/context/MCP/run records while migrating explicit APIs, then master router, eval migration and handoff.
-- Runtime still uses the original factory intentionally until Tasks 3–8 are ready.
+- Task 7 COMPLETE: All explicit specialist API execution (`chat`, `portfolio_chat`, `portfolio_risk_chat`, `explain_report`) migrated to registered fresh specialist factories in `AGENT_REGISTRY` / `specialist_agents.py`. Implemented authenticated `POST /api/options-agent/portfolio/risk/chat`. Bound cumulative `RequestHarness` and unified tool-read charging via `connection(..., harness=harness)`. Enforced strict history isolation and HTTP 409 `conversation_scope_changed` on topic/scope/contract/context changes and legacy mixed conversations before evidence acquisition. Removed `external_tools` from specialist runs. Runtime tests (`test_portfolio_agent.py`, `test_options_agent.py`, `test_options_report_chat.py`, `test_options_harness.py`, `test_portfolio_risk_integration.py`) migrated off `build_agent`. `build_agent` retained solely for `options_evals.py` until Task 9. Full Task 7 verification (110 passed) and H1-H3 regression (49 passed) clean.
+- Tasks 8–10 pending: master router, evaluation migration, final handoff.
 
 ## User override and decisions
 
@@ -27,6 +27,10 @@ Implementation is IN PROGRESS. Do not mark Part 1 complete or start Part 2.
 - Tree Ring CLI is unavailable on PATH; this tracked progress document supplies resumption state. No external Relay messages sent.
 
 ## Tests and current commands
+
+Options/report migration discovered a real context-estimation defect: Agno Message metrics contain non-JSON timers. Added RED→GREEN regression `test_context_estimator_ignores_sdk_runtime_timers`; estimate message content while excluding runtime metrics/references. Both real mocked SDK tool cycles now pass. Focused harness/tool-cycle suite: 11 passed in 21.24 seconds. Final affected suites (`test_specialist_api`, `test_options_agent`, `test_options_report_chat`, `test_options_gemini`, `test_options_harness`, `test_agent_harness`): **67 passed in 63.59 seconds**. Full backend suite has not been rerun for these migration changes.
+
+Latest risk runtime verification: `.\.venv\Scripts\python.exe -m pytest tests/test_specialist_api.py tests/test_options_agent.py tests/test_portfolio_agent.py tests/test_options_report_chat.py tests/test_specialist_mcp.py tests/test_agent_harness.py -q -p no:cacheprovider --tb=short`: **88 passed in 88.65 seconds**. Includes authenticated risk endpoint, risk-only model input/history, follow-ups, harness tool-read trace, legacy-scope rejection before fetch and invalid output non-persistence. Full suite has not been rerun for this risk integration.
 
 From `backend`, use `.\.venv\Scripts\python.exe`.
 Use `-p no:cacheprovider` because existing pytest cache is inaccessible.
@@ -51,9 +55,9 @@ Harness/provider tests: 26 passed, including real mocked Ollama HTTP transport, 
 
 - Ollama mocked HTTP format/token round-trip now verified; live model tool/schema performance remains unverified.
 - Ollama runtime availability/model download is not verified.
-- New factories are loaded by importing `specialist_agents`; production registration/wiring is pending.
+- Factories now register on options_agent module import; risk production wiring exists. Other specialist wiring remains pending.
 - Harden factory tests against forged scope contracts and actual tool naming restrictions with MCP tests.
-- Parent harness, risk endpoint, history isolation, master router, evaluation migration and final handoff are all pending.
+- Parent harness and history isolation are bound for risk requests only. Master routing and remaining production paths, evaluation migration and final handoff are pending.
 
 ## Resume prompt
 
