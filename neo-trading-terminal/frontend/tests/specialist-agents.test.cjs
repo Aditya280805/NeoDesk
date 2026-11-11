@@ -29,9 +29,33 @@ const deferred = () => {
 
 const settle = () => new Promise(resolve => setImmediate(resolve))
 
-function loadTs(relPath, overrides = {}, globals = {}) {
-  const filename = path.join(__dirname, '../src', relPath)
+function createVmContext(globals = {}) {
+  return vm.createContext({
+    console,
+    process,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    AbortController,
+    AbortSignal,
+    DOMException,
+    Event,
+    ...globals,
+  })
+}
+
+function loadTs(relPath, overrides = {}, globals = {}, state = {}) {
+  const srcRoot = path.join(__dirname, '../src')
+  const filename = path.join(srcRoot, relPath)
+  const normalized = path.relative(srcRoot, filename)
+  const cache = state.cache || (state.cache = new Map())
+  if (cache.has(normalized)) return cache.get(normalized).exports
+
+  const context = state.context || (state.context = createVmContext(globals))
   const mod = { exports: {} }
+  cache.set(normalized, mod)
+
   const source = fs.readFileSync(filename, 'utf8')
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
@@ -46,8 +70,8 @@ function loadTs(relPath, overrides = {}, globals = {}) {
     if (name.startsWith('@/')) {
       const sub = name.slice(2)
       for (const ext of ['.ts', '.tsx']) {
-        if (fs.existsSync(path.join(__dirname, '../src', sub + ext))) {
-          return loadTs(sub + ext, overrides, globals)
+        if (fs.existsSync(path.join(srcRoot, sub + ext))) {
+          return loadTs(sub + ext, overrides, globals, { context, cache })
         }
       }
     }
@@ -55,32 +79,18 @@ function loadTs(relPath, overrides = {}, globals = {}) {
       const base = path.resolve(path.dirname(filename), name)
       for (const ext of ['.ts', '.tsx']) {
         if (fs.existsSync(base + ext)) {
-          return loadTs(path.relative(path.join(__dirname, '../src'), base + ext), overrides, globals)
+          return loadTs(path.relative(srcRoot, base + ext), overrides, globals, { context, cache })
         }
       }
     }
     return require(name)
   }
-  vm.runInNewContext(
-    compiled,
-    {
-      module: mod,
-      exports: mod.exports,
-      require: localRequire,
-      console,
-      process,
-      setTimeout,
-      clearTimeout,
-      setInterval,
-      clearInterval,
-      AbortController,
-      AbortSignal,
-      DOMException,
-      Event,
-      ...globals,
-    },
+  const fn = vm.runInContext(
+    `(function(exports, require, module, __filename, __dirname) {\n${compiled}\n})`,
+    context,
     { filename }
   )
+  fn(mod.exports, localRequire, mod, filename, path.dirname(filename))
   return mod.exports
 }
 
@@ -154,13 +164,16 @@ function createHarness(options = {}) {
     removeEventListener() {},
   }
 
+  let contextError
+
   const fakeFetch = async (url, init = {}) => {
     const parsedBody = init.body ? JSON.parse(init.body) : undefined
     requests.push({ url, method: init.method || 'GET', body: parsedBody, signal: init.signal })
     const entry = responseQueue.shift()
-    if (!entry) throw new Error(`Unexpected fetch: ${init.method || 'GET'} ${url}`)
+    if (!entry) throw new contextError(`Unexpected fetch: ${init.method || 'GET'} ${url}`)
     const result = typeof entry === 'function' ? await entry({ url, method: init.method || 'GET', body: parsedBody, signal: init.signal }) : entry
-    if (result instanceof Error) throw result
+    if (result instanceof Error) throw new contextError(result.message)
+    if (result instanceof contextError) throw result
     const status = result.status ?? 200
     return {
       ok: status >= 200 && status < 300,
@@ -185,17 +198,20 @@ function createHarness(options = {}) {
     },
   }
 
-  const apiMod = loadTs('lib/api.ts', {}, sharedGlobals)
-  const portfolioEvidenceMod = loadTs('lib/portfolioEvidence.ts', {}, sharedGlobals)
-  const portfolioRiskMod = loadTs('lib/portfolioRisk.ts', { './portfolioEvidence': portfolioEvidenceMod }, sharedGlobals)
+  const vmState = { context: createVmContext(sharedGlobals), cache: new Map() }
+  contextError = vm.runInContext('Error', vmState.context)
+
+  const apiMod = loadTs('lib/api.ts', {}, sharedGlobals, vmState)
+  const portfolioEvidenceMod = loadTs('lib/portfolioEvidence.ts', {}, sharedGlobals, vmState)
+  const portfolioRiskMod = loadTs('lib/portfolioRisk.ts', { './portfolioEvidence': portfolioEvidenceMod }, sharedGlobals, vmState)
   const PortfolioEvidence = loadTs('components/PortfolioEvidence.tsx', {
     react: React,
     '@/lib/portfolioEvidence': portfolioEvidenceMod,
-  }, sharedGlobals).default
+  }, sharedGlobals, vmState).default
   const PortfolioRiskPanel = loadTs('components/PortfolioRiskPanel.tsx', {
     react: React,
     '@/lib/portfolioRisk': portfolioRiskMod,
-  }, sharedGlobals).default
+  }, sharedGlobals, vmState).default
 
   const monitoringMod = {
     watchVisibleSnapshots(refresh, onVisibility) {
@@ -223,14 +239,14 @@ function createHarness(options = {}) {
     'lucide-react': { __esModule: true, MessageCircle: Icon, RefreshCw: Icon, Send: Icon, ShieldCheck: Icon },
     '@/lib/api': apiMod,
     '@/lib/optionsMonitoring': options.realMonitoring
-      ? loadTs('lib/optionsMonitoring.ts', {}, sharedGlobals)
+      ? loadTs('lib/optionsMonitoring.ts', {}, sharedGlobals, vmState)
       : monitoringMod,
     '@/lib/portfolioEvidence': portfolioEvidenceMod,
     '@/lib/portfolioRisk': portfolioRiskMod,
     '@/components/PortfolioEvidence': { __esModule: true, default: PortfolioEvidence },
     '@/components/PortfolioRiskPanel': { __esModule: true, default: PortfolioRiskPanel },
     '@/components/PortfolioRiskSettings': { __esModule: true, default: PortfolioRiskSettings },
-  }, sharedGlobals).default
+  }, sharedGlobals, vmState).default
 
   function render() {
     cursor = 0
@@ -756,7 +772,9 @@ test('Auto-select rejects invalid or incomplete specialist payloads safely witho
 
     tree = h.render()
     const html = h.html(tree)
-    assert.match(html, /role="alert"/)
+    const alert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(alert)
+    assert.equal(textOf(alert), 'Portfolio risk response is missing required risk report evidence.')
     assert.doesNotMatch(html, /Missing risk report/)
     assert.doesNotMatch(html, /portfolio-risk/)
     assert.equal(findMonitoringCheckbox(tree).props.disabled, true)
@@ -870,8 +888,11 @@ test('Auto follow-up clarify retains active conversation_id and rejects spurious
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const html = h.html(h.render())
-    assert.match(html, /role="alert"/)
+    const treeAfterBadClarify = h.render()
+    const html = h.html(treeAfterBadClarify)
+    const alert = treeNodes(treeAfterBadClarify).find(n => n.props?.role === 'alert')
+    assert.ok(alert)
+    assert.equal(textOf(alert), 'Initial clarification response must not create a specialist conversation.')
     assert.doesNotMatch(html, /Please ask separately/)
   } finally {
     h.unmount()
@@ -884,16 +905,19 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
       name: 'wrong agent_id in explicit chain mode',
       mode: 'chain',
       payload: { ...chainFixture.response, agent_id: 'portfolio_analysis' },
+      expectedMessage: 'Unexpected specialist agent returned by server.',
     },
     {
       name: 'read_only false in explicit chain mode',
       mode: 'chain',
       payload: { ...chainFixture.response, read_only: false },
+      expectedMessage: 'Unexpected response format from options agent.',
     },
     {
       name: 'whitespace-only answer in explicit chain mode',
       mode: 'chain',
       payload: { ...chainFixture.response, answer: '   \n\t  ' },
+      expectedMessage: 'Unexpected response format from options agent.',
     },
     {
       name: 'portfolio_snapshot missing summary and limitations',
@@ -906,6 +930,7 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
           limitations: undefined,
         },
       },
+      expectedMessage: 'Portfolio analysis response is missing or mixed with invalid evidence.',
     },
     {
       name: 'portfolio response leaking risk_report',
@@ -914,6 +939,28 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
         ...portfolioFixture.response,
         risk_report: riskFixture.response.risk_snapshot.risk_report,
       },
+      expectedMessage: 'Portfolio analysis response is missing or mixed with invalid evidence.',
+    },
+    {
+      name: 'portfolio response leaking risk_snapshot',
+      mode: 'portfolio',
+      payload: {
+        ...portfolioFixture.response,
+        risk_snapshot: riskFixture.response.risk_snapshot,
+      },
+      expectedMessage: 'Portfolio analysis response is missing or mixed with invalid evidence.',
+    },
+    {
+      name: 'portfolio_snapshot leaking risk_inputs',
+      mode: 'portfolio',
+      payload: {
+        ...portfolioFixture.response,
+        portfolio_snapshot: {
+          ...portfolioFixture.response.portfolio_snapshot,
+          risk_inputs: { margin_used: '100' },
+        },
+      },
+      expectedMessage: 'Portfolio analysis response is missing or mixed with invalid evidence.',
     },
     {
       name: 'risk_snapshot missing coverage/findings/observation_times (render crash guard)',
@@ -925,7 +972,29 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
           risk_report: { report_id: 'r-partial', evaluated_at: '2026-11-11T10:34:12Z', summary: 'pass' },
         },
       },
+      expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
     },
+    {
+      name: 'risk response leaking top-level portfolio_snapshot',
+      mode: 'risk',
+      payload: {
+        ...riskFixture.response,
+        portfolio_snapshot: portfolioFixture.response.portfolio_snapshot,
+      },
+      expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
+    },
+    ...['holdings', 'positions', 'funds', 'orders', 'sections'].map(field => ({
+      name: `risk_snapshot leaking ${field}`,
+      mode: 'risk',
+      payload: {
+        ...riskFixture.response,
+        risk_snapshot: {
+          ...riskFixture.response.risk_snapshot,
+          [field]: field === 'sections' ? portfolioFixture.response.portfolio_snapshot.sections : [],
+        },
+      },
+      expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
+    })),
   ]
 
   for (const tc of cases) {
@@ -945,9 +1014,13 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
       await findForm(tree).props.onSubmit({ preventDefault() {} })
       await settle()
 
-      // Must render cleanly with role="alert" (not throw during renderToStaticMarkup) and omit broken evidence.
-      const html = h.html(h.render())
-      assert.match(html, /role="alert"/, `${tc.name}: expected validation error alert`)
+      // Must render cleanly with exact validateReply error message (not generic fallback) and omit broken evidence.
+      const treeAfterError = h.render()
+      const html = h.html(treeAfterError)
+      const alert = treeNodes(treeAfterError).find(n => n.props?.role === 'alert')
+      assert.ok(alert, `${tc.name}: expected validation error alert`)
+      assert.equal(textOf(alert), tc.expectedMessage, `${tc.name}: expected exact validateReply error message`)
+      assert.notEqual(textOf(alert), 'Request failed. Please try again.')
       assert.doesNotMatch(html, /class="portfolio-risk"|Portfolio risk assessment/, `${tc.name}: risk panel must not render`)
       assert.doesNotMatch(html, /portfolio-evidence/, `${tc.name}: portfolio panel must not render`)
     } finally {
@@ -985,8 +1058,11 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const html = h.html(h.render())
-    assert.match(html, /role="alert"/)
+    const treeAfterFlip = h.render()
+    const html = h.html(treeAfterFlip)
+    const alert = treeNodes(treeAfterFlip).find(n => n.props?.role === 'alert')
+    assert.ok(alert)
+    assert.equal(textOf(alert), 'Conversation scope changed unexpectedly. Start a new chat.')
     assert.doesNotMatch(html, /portfolio-risk/)
   } finally {
     h.unmount()
@@ -1149,7 +1225,86 @@ test('error alert does not wrap message in <p> so .error contrast is preserved',
     const alert = treeNodes(tree).find(n => n.props?.role === 'alert')
     assert.ok(alert)
     assert.equal(treeNodes(alert).some(n => n.type === 'p'), false)
+    assert.match(textOf(alert), new RegExp(scopeChangeFixture.response.detail.message))
     assert.ok(findButton(alert, 'New chat'))
+
+    // Non-409 ApiError (e.g. HTTP 503 string detail) must also render exact message in non-<p> container.
+    findButton(alert, 'New chat').props.onClick()
+    await settle()
+    tree = h.render()
+    findTextarea(tree).props.onChange({ target: { value: 'Trigger 503 error' } })
+    tree = h.render()
+    h.queue({ status: 503, data: { detail: 'Broker gateway unavailable right now.' } })
+    await findForm(tree).props.onSubmit({ preventDefault() {} })
+    await settle()
+
+    tree = h.render()
+    const apiErrAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(apiErrAlert)
+    assert.equal(treeNodes(apiErrAlert).some(n => n.type === 'p'), false)
+    assert.equal(textOf(apiErrAlert), 'Broker gateway unavailable right now.')
+  } finally {
+    h.unmount()
+  }
+})
+
+test('snapshotError renders exact ApiError and refresh validation messages in a non-<p> alert container while retaining prior snapshot', async () => {
+  const h = createHarness()
+  try {
+    h.queue(readyStatus())
+    h.render()
+    await settle()
+
+    // Initial portfolio refresh fails with HTTP 503 ApiError.
+    let tree = h.render()
+    findScopeSelect(tree).props.onChange({ target: { value: 'portfolio' } })
+    tree = h.render()
+    h.queue({ status: 503, data: { detail: 'Portfolio refresh timed out at broker.' } })
+    await findButton(tree, 'Refresh snapshot').props.onClick()
+    await settle()
+
+    tree = h.render()
+    let snapAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(snapAlert, 'Expected snapshotError alert')
+    assert.notEqual(snapAlert.type, 'p')
+    assert.equal(treeNodes(snapAlert).some(n => n.type === 'p'), false)
+    assert.match(snapAlert.props.className || '', /\berror\b/)
+    assert.match(snapAlert.props.className || '', /\boptions-chat-error\b/)
+    assert.equal(textOf(snapAlert), 'Portfolio refresh timed out at broker.')
+
+    // Succeed once, enable monitoring, then fail next refresh -> retains previous snapshot & appends notice.
+    h.queue({ status: 200, data: portfolioFixture.response.portfolio_snapshot })
+    await findButton(tree, 'Refresh snapshot').props.onClick()
+    await settle()
+    tree = h.render()
+    assert.match(h.html(tree), /portfolio-evidence/)
+
+    h.queue({ status: 503, data: { detail: 'Temporary upstream outage.' } })
+    findMonitoringCheckbox(tree).props.onChange({ target: { checked: true } })
+    await settle()
+
+    tree = h.render()
+    snapAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(snapAlert)
+    assert.notEqual(snapAlert.type, 'p')
+    assert.equal(treeNodes(snapAlert).some(n => n.type === 'p'), false)
+    assert.equal(textOf(snapAlert), 'Temporary upstream outage. The previous snapshot is retained below.')
+    assert.match(h.html(tree), /portfolio-evidence/)
+    assert.equal(findMonitoringCheckbox(tree).props.checked, false)
+
+    // Incomplete refresh payload in risk mode must surface exact Error message (not generic fallback).
+    findScopeSelect(tree).props.onChange({ target: { value: 'risk' } })
+    tree = h.render()
+    h.queue({ status: 200, data: { evidence_id: riskFixture.response.risk_snapshot.evidence_id } })
+    await findButton(tree, 'Refresh snapshot').props.onClick()
+    await settle()
+
+    tree = h.render()
+    snapAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(snapAlert)
+    assert.notEqual(snapAlert.type, 'p')
+    assert.equal(treeNodes(snapAlert).some(n => n.type === 'p'), false)
+    assert.equal(textOf(snapAlert), 'Portfolio risk snapshot is missing risk report evidence.')
   } finally {
     h.unmount()
   }

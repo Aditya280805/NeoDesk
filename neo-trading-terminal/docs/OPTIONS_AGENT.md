@@ -439,7 +439,7 @@ Run the third offline gate from backend:
 
 portfolio-risk-evals.v1 reuses the independent Task 3 arithmetic operands and adds
 missing/zero, stale, disabled/unset and policy/order authority cases over real
-private loopback MCP. It reports calculation portfolio-risk.1, prompt portfolio.2,
+private loopback MCP. It reports calculation portfolio-risk.1, prompt risk.1,
 null model version and cost, and model_evaluated=false. The separate fixed
 portfolio-risk-explanation.v1 rubric lives in
 backend/evals/portfolio_risk_explanation_rubric.json. Its human scoring remains

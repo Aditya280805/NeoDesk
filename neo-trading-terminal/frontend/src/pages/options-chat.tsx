@@ -249,8 +249,10 @@ function validateReply(
       'risk_report' in raw ||
       'risk_report_ids' in raw ||
       'risk_inputs' in raw ||
+      'risk_snapshot' in raw ||
       !isRecord(ps) ||
       'risk_report' in ps ||
+      'risk_inputs' in ps ||
       typeof ps.evidence_id !== 'string' ||
       !isRecord(ps.summary) ||
       !hasPortfolioSectionsShape(ps.sections) ||
@@ -273,7 +275,13 @@ function validateReply(
 
   const rs = raw.risk_snapshot
   if (
+    'portfolio_snapshot' in raw ||
     !isRecord(rs) ||
+    'holdings' in rs ||
+    'positions' in rs ||
+    'funds' in rs ||
+    'orders' in rs ||
+    'sections' in rs ||
     typeof rs.evidence_id !== 'string' ||
     !hasRiskReportShape(rs.risk_report) ||
     !isStringArray(raw.evidence_ids) ||
@@ -766,9 +774,9 @@ export default function OptionsChat() {
         </div>
 
         {snapshotError && (
-          <p className="error options-chat-error" role="alert">
-            {snapshotError}{hasAsideData && ' The previous snapshot is retained below.'}
-          </p>
+          <div className="error options-chat-error" role="alert">
+            <span>{snapshotError}{hasAsideData && ' The previous snapshot is retained below.'}</span>
+          </div>
         )}
 
         {effectiveScope === null && (

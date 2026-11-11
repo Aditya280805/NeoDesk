@@ -218,7 +218,7 @@ def test_portfolio_refresh_prompt_version(client,app):
     assert client.post('/api/options-agent/portfolio/snapshot').status_code==200
     with app.state.store.connect() as db:
         detail=json.loads(db.execute("SELECT detail FROM option_agent_runs WHERE kind='snapshot'").fetchone()[0])
-    assert detail['prompt_version']=='portfolio.2'
+    assert detail['prompt_version']=='snapshot.portfolio.1'
 
 
 def test_new_history_references_canonical_report_and_hydrates_owner(client, app):
