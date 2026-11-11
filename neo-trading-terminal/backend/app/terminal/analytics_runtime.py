@@ -24,9 +24,9 @@ class TurnBudget:
 
 
 class BoundedWork:
-    def __init__(self, capacity=4):
+    def __init__(self, capacity=4, *, pending=None):
         self.capacity = capacity
-        self.pending = {}
+        self.pending = {} if pending is None else pending
 
     async def run(self, owner, factory, timeout=10):
         if owner in self.pending or len(self.pending) >= self.capacity:

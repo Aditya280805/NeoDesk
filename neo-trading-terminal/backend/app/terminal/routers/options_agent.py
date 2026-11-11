@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, HTTPException
 
 from app.terminal.options_agent import ChatRequest, OptionsContext
 from app.terminal.unified_chat import UnifiedChatRequest, dispatch_unified
+from app.terminal.analytics_contracts import AnalyticsSnapshotRequest
 
 def get_user_id(request):
     user = getattr(request.state, 'user', None)
@@ -30,6 +31,11 @@ def status(request: Request):
 @options_agent_router.post('/snapshot')
 async def snapshot(request: Request, body: OptionsContext):
     return await request.app.state.options_agent.snapshot(get_user_id(request), body)
+
+
+@options_agent_router.post('/analytics/snapshot')
+async def analytics_snapshot(request: Request, body: AnalyticsSnapshotRequest):
+    return await request.app.state.options_agent.analytics_snapshot(get_user_id(request),body)
 
 
 @options_agent_router.post('/chat')

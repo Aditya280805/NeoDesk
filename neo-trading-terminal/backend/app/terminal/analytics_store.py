@@ -3,6 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
+from contextlib import nullcontext
+import time
 
 
 class AnalyticsStore:
@@ -48,3 +50,29 @@ class AnalyticsStore:
         with self.connect() as db:
             row = db.execute('SELECT payload FROM analytics_evidence WHERE user_id=? AND evidence_id=?',(user_id,evidence_id)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def capture_batch(self,user_id,evidence,*,validate=None,publication_guard=None,deadline=None):
+        """Publish a complete capture atomically; conflicts roll the batch back."""
+        if type(user_id) is not int or user_id<=0:
+            raise ValueError('Authenticated owner required')
+        with publication_guard() if publication_guard is not None else nullcontext():
+            with self.connect() as db:
+                if deadline is not None:
+                    remaining = deadline-time.monotonic()
+                    if remaining<=0:
+                        raise TimeoutError('Capture publication deadline exhausted')
+                    db.execute('PRAGMA busy_timeout = %d' % max(1,min(10000,int(remaining*1000))))
+                if validate is not None:
+                    validate()
+                for item in evidence:
+                    payload = item.model_dump(mode='json')
+                    identity = str(item.evidence_id)
+                    encoded = json.dumps(payload,allow_nan=False,sort_keys=True)
+                    existing = db.execute('SELECT payload FROM analytics_evidence WHERE user_id=? AND evidence_id=?',(user_id,identity)).fetchone()
+                    if existing:
+                        if existing[0]!=encoded:
+                            raise ValueError('Immutable evidence conflict')
+                    else:
+                        db.execute('INSERT INTO analytics_evidence VALUES (?,?,?,?)',(user_id,identity,item.retrieved_at.isoformat(),encoded))
+                if validate is not None:
+                    validate()

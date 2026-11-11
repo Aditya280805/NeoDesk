@@ -45,6 +45,13 @@ class OptionsAgent:
         self.routing_limiter = RoutingLimiter(self)
         self.refresh_last = {}
         self.mcp = OptionsMCP(SnapshotService(market), config.options_mcp_port, portfolio_service=portfolio_service)
+        self.analytics_capture = None
+        if getattr(config,'analytics_tools_enabled',False):
+            from .analytics_capture import AnalyticsCaptureService
+            from .analytics_runtime import BoundedWork
+            from .analytics_store import AnalyticsStore
+            self.analytics_capture = AnalyticsCaptureService(market,AnalyticsStore(store.path),self.mcp.snapshots,
+                portfolio_service,work=BoundedWork(pending=self.mcp.pending))
         with store.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS option_chat_conversations (
@@ -64,6 +71,7 @@ class OptionsAgent:
     def status(self):
         provider = provider_settings(self.config)
         return {'configured': provider.configured and self.mcp.ready, 'model_configured': provider.configured,
+                'analytics_tools_enabled': bool(getattr(self.config,'analytics_tools_enabled',False)),
                 'mcp_ready': self.mcp.ready, 'enabled': self.config.options_agent_enabled,
                 'provider': provider.provider, 'api_key_env': provider.key_name,
                 'setup_error': provider.error,
@@ -165,6 +173,29 @@ class OptionsAgent:
 
     async def snapshot(self, user_id, context):
         return await self._snapshot(user_id, context, 'chain')
+
+    async def analytics_snapshot(self,user_id,body):
+        from .analytics_runtime import TOOLS_BY_ROLE, TurnBudget
+        if type(user_id) is not int or user_id<=0:
+            raise HTTPException(401,'Sign in to your individual account.')
+        if not getattr(self.config,'analytics_tools_enabled',False):
+            raise HTTPException(404,'Analytics snapshots are not enabled.')
+        if self.analytics_capture is None:
+            raise HTTPException(503,'Analytics capture is unavailable. Restart after enabling it.')
+        self.routing_limiter.enter(user_id)
+        try:
+            captured = await self.analytics_capture.capture(user_id,body.context,
+                body.tools or sorted(TOOLS_BY_ROLE[body.role]),budget=TurnBudget())
+            if captured.owner_id!=user_id:
+                raise ValueError('Evidence owner mismatch')
+            return {'schema_version':'analytics-snapshot.v1','role':body.role,'read_only':True,
+                    'evidence':{name:item.model_dump(mode='json') for name,item in captured.for_role(body.role).items()}}
+        except TimeoutError:
+            raise HTTPException(504,'Analytics capture timed out. Retry after the current request finishes.') from None
+        except Exception:
+            raise HTTPException(503,'Analytics evidence could not be captured. Check your broker session and market selection.') from None
+        finally:
+            self.routing_limiter.leave(user_id)
 
     async def portfolio_snapshot(self, user_id):
         return await self._snapshot(user_id, None, 'portfolio')

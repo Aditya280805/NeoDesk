@@ -2,6 +2,7 @@ import os
 import secrets
 from typing import Literal
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,14 +37,29 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     openai_backup_api_key: SecretStr | None = None
     gemini_backup_api_key: SecretStr | None = None
-    options_agent_provider: Literal['auto', 'gemini', 'openai', 'ollama'] = 'auto'
+    options_agent_provider: Literal['auto', 'gemini', 'openai', 'ollama'] = 'ollama'
     options_agent_model: str | None = Field(default=None, min_length=1, max_length=128,
                                           pattern=r'^[A-Za-z0-9_.:-]+$')
+    ollama_base_url: str = 'http://localhost:11434/v1'
+    ollama_api_key: SecretStr = SecretStr('ollama')
+    ollama_reasoning_effort: Literal['none', 'low', 'medium', 'high'] | None = 'none'
+    ollama_timeout_seconds: int = Field(default=90, ge=5, le=600)
+    options_agent_stream: bool = True
     options_agent_enabled: bool = True
+    analytics_tools_enabled: bool = False
     agent_input_token_estimate_limit: int = Field(default=24000, ge=1)
     agent_context_token_limit: int = Field(default=32768, ge=1)
     options_mcp_port: int = Field(default=8766, ge=0, le=65535)
     external_mcp_config: Path = PROJECT_ROOT / 'mcp.json'
+
+    @model_validator(mode='after')
+    def _validate_ollama_url(self):
+        raw = (self.ollama_base_url or '').strip().rstrip('/')
+        parsed = urlparse(raw)
+        if parsed.scheme != 'http' or parsed.hostname not in {'localhost', '127.0.0.1', '::1'} or not parsed.netloc:
+            raise ValueError('OLLAMA_BASE_URL must be an http loopback URL (localhost, 127.0.0.1, or ::1)')
+        self.ollama_base_url = raw
+        return self
 
     @model_validator(mode='after')
     def _validate_agent_context(self):

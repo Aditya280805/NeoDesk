@@ -6,12 +6,26 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from .options_snapshot import OptionsContext
 
 Role = Literal['options_trading_analysis', 'portfolio_analysis', 'portfolio_risk']
 
 
 class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid', frozen=True)
+
+
+class AnalyticsSnapshotRequest(Contract):
+    role: Role
+    context: OptionsContext = Field(default_factory=OptionsContext)
+    tools: tuple[str, ...] = Field(default=(),max_length=3)
+
+    @model_validator(mode='after')
+    def allowed_sections(self):
+        from .analytics_runtime import TOOLS_BY_ROLE
+        if len(set(self.tools))!=len(self.tools) or not set(self.tools)<=TOOLS_BY_ROLE[self.role]:
+            raise ValueError('Analytics sections do not match selected specialist')
+        return self
 
 
 class RoutingDecision(Contract):
