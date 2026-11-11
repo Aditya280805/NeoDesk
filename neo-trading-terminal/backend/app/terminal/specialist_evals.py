@@ -11,12 +11,12 @@ import copy
 from datetime import UTC, datetime, timedelta
 import json
 import logging
+import math
 from pathlib import Path
-import re
 import statistics
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -28,11 +28,10 @@ from app.terminal.agent_scope import (
     AgentAnswer,
     PortfolioAnalysisAnswer,
     PortfolioRiskAnswer,
-    RouteAnswer,
     specialist_scope,
 )
 from app.terminal.options_mcp import OptionsMCP, TOOL_VERSION
-from app.terminal.options_model import provider_settings
+from app.terminal.options_model import provider_settings, close_agent_model, options_run
 from app.terminal.options_snapshot import OptionsContext, SnapshotService
 from app.terminal.portfolio_contracts import PortfolioSnapshot, PortfolioSection, PortfolioRow
 from app.terminal.portfolio_risk_contracts import RiskPolicy, RiskReport
@@ -177,9 +176,6 @@ async def specialist_replay(mode='offline', config=None):
     if mode == 'live-model':
         if not provider.configured:
             raise ValueError(provider.error or f"{provider.key_name} is required for live-model evaluation.")
-    else:
-        if mode != 'offline':
-            raise ValueError("Only offline and live-model modes are supported.")
 
     market = ReplayMarket(raw_chain)
     portfolio = ReplayPortfolio()
@@ -189,6 +185,7 @@ async def specialist_replay(mode='offline', config=None):
     latencies = []
     total_mcp_reads = 0
     total_model_attempts = 0
+    total_schema_validations = 0
 
     category_counts = {
         'routing': {'total': 0, 'passed': 0},
@@ -204,21 +201,20 @@ async def specialist_replay(mode='offline', config=None):
             checks = []
             mcp_reads = 0
             model_attempts = 0
+            schema_validations = 0
+            actual_route = None
             cat_evaluated = {'routing': False, 'numeric': False, 'citation': False, 'abstention': False}
 
             flow = case['flow']
             scenario = case['scenario']
             expected_route = case.get('expected_route')
 
-            # 1. Routing classification check
-            if expected_route:
-                cat_evaluated['routing'] = True
-                checks.append(f'route classification: {expected_route}')
-
             # Dispatch-level scenarios: scope_change, timeout, provider_failure, clarify
             if scenario == 'scope_change':
                 cat_evaluated['routing'] = True
                 cat_evaluated['abstention'] = True
+                actual_route = 'chain'
+                checks.append('route classification: chain')
                 mock_service = SimpleNamespace(
                     config=config,
                     routing_limiter=RoutingLimiter(),
@@ -230,7 +226,6 @@ async def specialist_replay(mode='offline', config=None):
                     status=lambda: {'model_configured': True, 'enabled': True},
                 )
                 try:
-                    # Router routes question to 'chain'
                     original_route = unified_chat.route_question
                     unified_chat.route_question = AsyncMock(return_value='chain')
                     try:
@@ -296,6 +291,22 @@ async def specialist_replay(mode='offline', config=None):
             elif flow == 'clarify':
                 cat_evaluated['routing'] = True
                 cat_evaluated['abstention'] = True
+                if mode == 'live-model':
+                    log_context = options_run.set(True)
+                    try:
+                        harness = RequestHarness(auto=True)
+                        actual_route = await route_question(config, case['question'], harness=harness)
+                        model_attempts += 1
+                    finally:
+                        options_run.reset(log_context)
+                else:
+                    actual_route = 'clarify'
+
+                if actual_route != expected_route:
+                    failures.append(f"route mismatch: expected {expected_route}, got {actual_route}")
+                else:
+                    checks.append(f"route classification: {actual_route}")
+
                 mock_service = SimpleNamespace(
                     config=config,
                     routing_limiter=RoutingLimiter(),
@@ -361,17 +372,39 @@ async def specialist_replay(mode='offline', config=None):
                         if not snapshot.get('snapshot_id'):
                             failures.append('missing snapshot_id in snapshot')
 
+                    if mode == 'live-model':
+                        log_context = options_run.set(True)
+                        try:
+                            definition = specialist_scope('chain', OptionsContext())
+                            agent = get_agent(definition.agent_id)(config, snapshot, conn.tools, scope=definition)
+                            try:
+                                output = await agent.arun(json.dumps({
+                                    'question': case['question'],
+                                    'current_snapshot': snapshot,
+                                    'previous_conversation': []
+                                }))
+                                model_attempts += 1
+                                content = output.content
+                                answer = AgentAnswer.model_validate_json(content) if isinstance(content, str) else AgentAnswer.model_validate(content)
+                                schema_validations += 1
+                            finally:
+                                await close_agent_model(agent)
+                        finally:
+                            options_run.reset(log_context)
+                    else:
+                        if scenario == 'forged_citation':
+                            forged_id = case.get('forged_citation_attempt', '00000000-0000-0000-0000-000000000000')
+                            answer = AgentAnswer(answer='Forged test answer', snapshot_ids=[forged_id])
+                        else:
+                            answer = AgentAnswer(answer='Verified chain response', snapshot_ids=[snapshot['snapshot_id']])
+                        schema_validations += 1
+
                     if scenario == 'forged_citation':
-                        cat_evaluated['citation'] = True
-                        forged_id = case.get('forged_citation_attempt', '00000000-0000-0000-0000-000000000000')
-                        answer = AgentAnswer(answer='Forged test answer', snapshot_ids=[forged_id])
                         if answer.snapshot_ids == [snapshot['snapshot_id']]:
                             failures.append('forged citation was accepted')
                         else:
                             checks.append('forged citation rejected')
                     else:
-                        answer = AgentAnswer(answer='Verified chain response', snapshot_ids=[snapshot['snapshot_id']])
-                        model_attempts += 1
                         if answer.snapshot_ids != [snapshot['snapshot_id']]:
                             failures.append('citation validation failed')
 
@@ -463,8 +496,29 @@ async def specialist_replay(mode='offline', config=None):
                     # Citation check
                     cat_evaluated['citation'] = True
                     checks.append('evidence citation validation')
-                    answer = PortfolioAnalysisAnswer(answer='Holdings evaluated.', evidence_ids=[snapshot['evidence_id']])
-                    model_attempts += 1
+                    if mode == 'live-model':
+                        log_context = options_run.set(True)
+                        try:
+                            definition = specialist_scope('portfolio', None)
+                            agent = get_agent(definition.agent_id)(config, snapshot, conn.tools, scope=definition)
+                            try:
+                                output = await agent.arun(json.dumps({
+                                    'question': case['question'],
+                                    'current_portfolio_snapshot': snapshot,
+                                    'previous_conversation': []
+                                }))
+                                model_attempts += 1
+                                content = output.content
+                                answer = PortfolioAnalysisAnswer.model_validate_json(content) if isinstance(content, str) else PortfolioAnalysisAnswer.model_validate(content)
+                                schema_validations += 1
+                            finally:
+                                await close_agent_model(agent)
+                        finally:
+                            options_run.reset(log_context)
+                    else:
+                        answer = PortfolioAnalysisAnswer(answer='Holdings evaluated.', evidence_ids=[snapshot['evidence_id']])
+                        schema_validations += 1
+
                     if [str(e) for e in answer.evidence_ids] != [snapshot['evidence_id']]:
                         failures.append('portfolio evidence citation mismatch')
 
@@ -538,12 +592,33 @@ async def specialist_replay(mode='offline', config=None):
                     # Citation check
                     cat_evaluated['citation'] = True
                     checks.append('risk citation validation')
-                    answer = PortfolioRiskAnswer(
-                        answer='Risk evaluated.',
-                        evidence_ids=[risk_snapshot['evidence_id']],
-                        risk_report_ids=[report.report_id],
-                    )
-                    model_attempts += 1
+                    if mode == 'live-model':
+                        log_context = options_run.set(True)
+                        try:
+                            definition = specialist_scope('risk', None)
+                            agent = get_agent(definition.agent_id)(config, risk_snapshot, conn.tools, scope=definition)
+                            try:
+                                output = await agent.arun(json.dumps({
+                                    'question': case['question'],
+                                    'current_risk_report': risk_snapshot['risk_report'],
+                                    'previous_conversation': []
+                                }))
+                                model_attempts += 1
+                                content = output.content
+                                answer = PortfolioRiskAnswer.model_validate_json(content) if isinstance(content, str) else PortfolioRiskAnswer.model_validate(content)
+                                schema_validations += 1
+                            finally:
+                                await close_agent_model(agent)
+                        finally:
+                            options_run.reset(log_context)
+                    else:
+                        answer = PortfolioRiskAnswer(
+                            answer='Risk evaluated.',
+                            evidence_ids=[risk_snapshot['evidence_id']],
+                            risk_report_ids=[report.report_id],
+                        )
+                        schema_validations += 1
+
                     if (
                         [str(e) for e in answer.evidence_ids] != [str(risk_snapshot['evidence_id'])]
                         or [str(r) for r in answer.risk_report_ids] != [str(report.report_id)]
@@ -563,6 +638,7 @@ async def specialist_replay(mode='offline', config=None):
             latencies.append(latency_ms)
             total_mcp_reads += mcp_reads
             total_model_attempts += model_attempts
+            total_schema_validations += schema_validations
 
             passed = len(failures) == 0
             results.append({
@@ -570,6 +646,9 @@ async def specialist_replay(mode='offline', config=None):
                 'split': case['split'],
                 'scenario': case['scenario'],
                 'flow': case['flow'],
+                'actual_route': actual_route,
+                'expected_route': expected_route,
+                'model_evaluated': mode == 'live-model' and model_attempts > 0,
                 'passed': passed,
                 'checks': checks,
                 'failures': failures,
@@ -577,6 +656,7 @@ async def specialist_replay(mode='offline', config=None):
                 'calls': {
                     'mcp_tool_reads': mcp_reads,
                     'model_attempts': model_attempts,
+                    'schema_validations': schema_validations,
                     'total': mcp_reads + model_attempts,
                 },
             })
@@ -609,15 +689,18 @@ async def specialist_replay(mode='offline', config=None):
             'passed': sum(1 for r in scope_results if r['passed']),
         }
 
-    # Aggregate metrics
-    mean_lat = round(statistics.mean(latencies), 2) if latencies else 0.0
-    med_lat = round(statistics.median(latencies), 2) if latencies else 0.0
-    if len(latencies) >= 20:
-        p95_lat = round(statistics.quantiles(latencies, n=20)[18], 2)
-    elif latencies:
-        p95_lat = round(max(latencies), 2)
+    # Clean nearest-rank latency calculation
+    sorted_lat = sorted(latencies)
+    n = len(sorted_lat)
+    if n > 0:
+        p95_idx = max(0, math.ceil(0.95 * n) - 1)
+        p95_lat = sorted_lat[p95_idx]
+        med_lat = round(statistics.median(latencies), 2)
+        mean_lat = round(statistics.mean(latencies), 2)
     else:
         p95_lat = 0.0
+        med_lat = 0.0
+        mean_lat = 0.0
 
     prompt_versions = {
         'chain': specialist_scope('chain', OptionsContext()).prompt_version,
@@ -629,12 +712,12 @@ async def specialist_replay(mode='offline', config=None):
     report = {
         'dataset_version': cases_data.get('dataset_version', 'specialist-evals.v1'),
         'rubric_version': rubric.get('rubric_version', 'specialist-rubric.v1'),
-        'model_version': provider.model if mode == 'live-model' else None,
+        'model_version': provider.model if (mode == 'live-model' and total_model_attempts > 0) else None,
         'prompt_versions': prompt_versions,
         'tool_version': TOOL_VERSION,
         'calculation_version': 'portfolio-risk.1',
         'mode': mode,
-        'model_evaluated': mode == 'live-model',
+        'model_evaluated': mode == 'live-model' and total_model_attempts > 0,
         'cost': None,
         'automated_checks_limit': (
             'Deterministic protocol and validation checks only; '
@@ -653,6 +736,7 @@ async def specialist_replay(mode='offline', config=None):
                 'total': total_mcp_reads + total_model_attempts,
                 'mcp_tool_reads': total_mcp_reads,
                 'model_attempts': total_model_attempts,
+                'schema_validations': total_schema_validations,
             },
             'latency_ms': {
                 'p50': med_lat,

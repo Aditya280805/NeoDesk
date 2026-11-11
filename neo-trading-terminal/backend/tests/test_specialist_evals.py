@@ -35,16 +35,29 @@ def test_specialist_evals_offline_contract():
     assert 'calls' in agg
     assert 'total' in agg['calls']
     assert 'mcp_tool_reads' in agg['calls']
-    assert 'model_attempts' in agg['calls']
+    assert agg['calls']['model_attempts'] == 0  # offline replay never invokes live models
+    assert agg['calls']['schema_validations'] > 0
     assert 'latency_ms' in agg
     for metric in ('p50', 'p95', 'mean'):
         assert agg['latency_ms'][metric] >= 0
 
+    # Routing is only scored on cases that genuinely execute routing
+    assert 0 < report['category_summaries']['routing']['total'] < counts['total']
+
     assert len(report['results']) == counts['total']
+    has_routed_case = False
+    has_non_routed_case = False
     for r in report['results']:
         assert r['passed'] is True
         assert r['failures'] == []
         assert len(r['checks']) > 0
+        assert 'actual_route' in r
+        if r['actual_route'] is not None:
+            has_routed_case = True
+            assert r['actual_route'] == r['expected_route']
+        else:
+            has_non_routed_case = True
+    assert has_routed_case and has_non_routed_case
 
 
 def test_specialist_cases_and_rubric_file_integrity():
@@ -109,6 +122,52 @@ def test_live_model_requires_explicit_opt_in_and_validation():
     empty_config = Settings(_env_file=None, openai_api_key=None, gemini_api_key=None)
     with pytest.raises(ValueError, match='(required|configured|credentials)'):
         asyncio.run(specialist_replay('live-model', config=empty_config))
+
+
+def test_live_model_mode_invokes_registered_agent_with_mock_transport(monkeypatch):
+    import httpx
+    from pydantic import SecretStr
+    from app.terminal.specialist_evals import specialist_replay
+    from app.core.config import Settings
+    from app.terminal.agent_scope import RouteAnswer, AgentAnswer, PortfolioAnalysisAnswer, PortfolioRiskAnswer
+    from agno.agent import Agent
+    from agno.team import Team
+
+    live_config = Settings(_env_file=None, openai_api_key=SecretStr('fixture-key'), options_agent_model='gpt-4.1-mini')
+
+    model_calls = []
+
+    # Mock agent and team arun
+    original_arun_agent = Agent.arun
+    original_arun_team = Team.arun
+
+    async def mock_agent_arun(self, *args, **kwargs):
+        model_calls.append(self.name)
+        # return appropriate output based on output_schema
+        schema = getattr(self, 'output_schema', None)
+        if schema is AgentAnswer:
+            return type('MockOutput', (), {'content': AgentAnswer(answer='Live chain analysis', snapshot_ids=['11111111-1111-1111-1111-111111111111']), 'metrics': None})()
+        elif schema is PortfolioAnalysisAnswer:
+            return type('MockOutput', (), {'content': PortfolioAnalysisAnswer(answer='Live portfolio analysis', evidence_ids=['22222222-2222-2222-2222-222222222222']), 'metrics': None})()
+        elif schema is PortfolioRiskAnswer:
+            return type('MockOutput', (), {'content': PortfolioRiskAnswer(answer='Live risk analysis', evidence_ids=['33333333-3333-3333-3333-333333333333'], risk_report_ids=['44444444-4444-4444-4444-444444444444']), 'metrics': None})()
+        elif schema is RouteAnswer:
+            return type('MockOutput', (), {'content': RouteAnswer(scope='chain'), 'metrics': None})()
+        return type('MockOutput', (), {'content': {'answer': 'mock'}, 'metrics': None})()
+
+    async def mock_team_arun(self, *args, **kwargs):
+        model_calls.append(self.name)
+        return type('MockOutput', (), {'content': RouteAnswer(scope='clarify'), 'metrics': None, 'status': None})()
+
+    monkeypatch.setattr(Agent, 'arun', mock_agent_arun)
+    monkeypatch.setattr(Team, 'arun', mock_team_arun)
+
+    report = asyncio.run(specialist_replay('live-model', config=live_config))
+    assert report['mode'] == 'live-model'
+    assert report['model_evaluated'] is True
+    assert report['model_version'] == 'gpt-4.1-mini'
+    assert report['aggregate_metrics']['calls']['model_attempts'] > 0
+    assert len(model_calls) > 0
 
 
 def test_no_options_monitor_or_build_agent_imported_or_registered():
