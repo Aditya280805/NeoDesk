@@ -261,7 +261,17 @@ async def dispatch_unified(service, user_id, body):
         'agent_id': 'master_router',
         'parent_run_id': parent_run_id,
     }
-    state = 'failed'
+    persisted = False
+
+    def persist_parent(status, failure_reason=None):
+        nonlocal persisted
+        if persisted:
+            return
+        persisted = True
+        if failure_reason:
+            parent_detail['failure_reason'] = failure_reason
+        parent_detail['harness'] = harness.trace()
+        _record_parent_run(service, user_id, parent_run_id, status, started, parent_detail)
 
     try:
         async with asyncio.timeout_at(harness.deadline):
@@ -277,19 +287,15 @@ async def dispatch_unified(service, user_id, body):
                 except HTTPException:
                     raise
                 except Exception as error:
-                    if isinstance(error, HarnessError):
-                        parent_detail['failure_reason'] = error.code
-                    else:
-                        parent_detail['failure_reason'] = 'routing_failed'
+                    reason = error.code if isinstance(error, HarnessError) else 'routing_failed'
+                    persist_parent('failed', reason)
                     raise HTTPException(503, 'Unable to route your question. Please retry or use a specific options or portfolio chat.', headers={'X-Options-Run-Id': parent_run_id}) from None
 
             parent_detail['scope'] = routed_scope
 
             if routed_scope == 'clarify':
-                state = 'completed'
                 parent_detail['stages'].append('clarify')
-                parent_detail['harness'] = harness.trace()
-                _record_parent_run(service, user_id, parent_run_id, 'completed', started, parent_detail)
+                persist_parent('completed')
                 return {
                     'scope': 'clarify',
                     'agent_id': 'master_router',
@@ -301,9 +307,7 @@ async def dispatch_unified(service, user_id, body):
                 }
 
             if current_scope is not None and routed_scope != current_scope:
-                parent_detail['failure_reason'] = 'conversation_scope_changed'
-                parent_detail['harness'] = harness.trace()
-                _record_parent_run(service, user_id, parent_run_id, 'failed', started, parent_detail)
+                persist_parent('failed', 'conversation_scope_changed')
                 raise HTTPException(409, {
                     'code': 'conversation_scope_changed',
                     'message': 'Start a new conversation after changing scope, specialist, or market selection.',
@@ -334,39 +338,24 @@ async def dispatch_unified(service, user_id, body):
             else:
                 raise HTTPException(503, 'Unable to route your question.')
 
-            state = 'completed'
             child_run_id = result.get('run_id')
             parent_detail['child_run_id'] = child_run_id
-            parent_detail['harness'] = harness.trace()
-            _record_parent_run(service, user_id, parent_run_id, 'completed', started, parent_detail)
+            persist_parent('completed')
             return {'scope': routed_scope, 'parent_run_id': parent_run_id, **result}
 
     except TimeoutError:
-        state = 'timeout'
-        parent_detail['failure_reason'] = 'timeout'
-        parent_detail['harness'] = harness.trace()
-        _record_parent_run(service, user_id, parent_run_id, 'timeout', started, parent_detail)
+        persist_parent('timeout', 'timeout')
         raise HTTPException(504, 'Options chat timed out. Retry after the current request finishes.', headers={'X-Options-Run-Id': parent_run_id}) from None
     except asyncio.CancelledError:
-        state = 'cancelled'
-        parent_detail['failure_reason'] = 'cancelled'
-        parent_detail['harness'] = harness.trace()
-        _record_parent_run(service, user_id, parent_run_id, 'cancelled', started, parent_detail)
+        persist_parent('cancelled', 'cancelled')
         raise
-    except HTTPException:
-        if state != 'completed' and 'failure_reason' not in parent_detail:
-            parent_detail['failure_reason'] = 'specialist_failed'
-            parent_detail['harness'] = harness.trace()
-            _record_parent_run(service, user_id, parent_run_id, 'failed', started, parent_detail)
+    except HTTPException as error:
+        persist_parent('failed', 'specialist_failed')
+        error.headers = {**(error.headers or {}), 'X-Options-Run-Id': parent_run_id}
         raise
     except Exception as error:
-        state = 'failed'
-        if isinstance(error, HarnessError):
-            parent_detail['failure_reason'] = error.code
-        else:
-            parent_detail['failure_reason'] = 'routing_failed'
-        parent_detail['harness'] = harness.trace()
-        _record_parent_run(service, user_id, parent_run_id, 'failed', started, parent_detail)
+        reason = error.code if isinstance(error, HarnessError) else 'routing_failed'
+        persist_parent('failed', reason)
         raise HTTPException(503, 'Unable to route your question. Please retry or use a specific options or portfolio chat.', headers={'X-Options-Run-Id': parent_run_id}) from None
     finally:
         if limiter:

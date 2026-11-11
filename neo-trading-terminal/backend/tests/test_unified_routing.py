@@ -145,6 +145,37 @@ def test_unified_parent_child_harness_accounting_and_trace_persistence(tmp_path,
         assert 'password' not in str(trace).lower()
 
 
+def test_routing_failure_persists_parent_run_and_returns_header(tmp_path, monkeypatch):
+    from app.core.config import Settings
+    from app.terminal.server import create_app
+    from fastapi.testclient import TestClient
+    from pydantic import SecretStr
+
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, environment='test',
+        app_password=None, openai_api_key=SecretStr('fixture'), options_mcp_port=0))
+
+    monkeypatch.setattr('app.terminal.unified_chat.route_question',
+        AsyncMock(side_effect=RuntimeError('Routing network failure')))
+
+    with TestClient(app, headers={'X-NeoDesk': '1'}) as client:
+        assert client.post('/api/auth/register', json={'email': 'router_fail@example.com',
+            'password': 'test-password-123', 'display_name': 'RouterFailTester'}).status_code == 200
+        res = client.post('/api/options-agent/unified-chat', json={'message': 'Show my holdings'})
+        assert res.status_code == 503
+        run_id = res.headers.get('X-Options-Run-Id')
+        assert run_id, "Response must include X-Options-Run-Id header"
+
+        run_rec = client.get(f'/api/options-agent/runs/{run_id}')
+        assert run_rec.status_code == 200
+        data = run_rec.json()
+        assert data['kind'] == 'unified_chat'
+        assert data['status'] == 'failed'
+        assert data['detail']['agent_id'] == 'master_router'
+        assert data['detail']['failure_reason'] == 'routing_failed'
+        assert 'harness' in data['detail']
+        assert 'attempts' in data['detail']['harness']
+
+
 def test_real_team_routes_using_fake_model_transport(monkeypatch):
     import json
     import httpx

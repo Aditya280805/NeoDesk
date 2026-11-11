@@ -341,17 +341,56 @@ def test_unified_saved_report_bypass_skips_router(client, app, monkeypatch):
     router_mock.assert_not_called()
 
 
-def test_citation_guard_unsupported_scope(app):
-    from app.terminal.options_agent import OptionsAgent
+def test_citation_guard_unsupported_scope(client, app, monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.terminal import options_agent as opt_module
     from app.terminal.agent_scope import AgentScope
+    from app.terminal.options_snapshot import ChatRequest, OptionsContext
     from pydantic import BaseModel
+
     class DummyAnswer(BaseModel):
         answer: str
-    bad_scope = AgentScope('unsupported', '1', 'dummy', {}, DummyAnswer, ())
+
+    captured_errors = []
+    real_provider_failure = opt_module.provider_failure
+    def capture_failure(config, error):
+        captured_errors.append(error)
+        return real_provider_failure(config, error)
+    monkeypatch.setattr('app.terminal.options_agent.provider_failure', capture_failure)
+
     agent = app.state.options_agent
-    with pytest.raises(ValueError, match='Unsupported scope: unsupported'):
-        # Trigger citation branch directly by inspecting citation check behavior
-        # In _chat, citation validation has:
-        # if report_mode: ... elif scope == 'chain': ... elif scope == 'portfolio': ... elif scope == 'risk': ... else: raise ValueError(...)
-        if bad_scope.scope not in ('chain', 'portfolio', 'risk', 'strategy', 'scan', 'alert', 'backtest'):
-            raise ValueError(f'Unsupported scope: {bad_scope.scope}')
+    bad_scope = AgentScope(
+        scope='unsupported',
+        prompt_version='1',
+        allowed_tool='get_option_snapshot',
+        stored_context={'scope': 'unsupported'},
+        output_contract=DummyAnswer,
+        instructions=(),
+    )
+    monkeypatch.setitem(AGENT_REGISTRY, bad_scope.agent_id, lambda *a, **kw:
+        SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content={'answer': 'valid answer'}))))
+
+    @asynccontextmanager
+    async def mock_connection(*args, **kwargs):
+        conn = SimpleNamespace(
+            token='tok-1',
+            tools=[],
+            _snapshot=AsyncMock(return_value={'snapshot_id': 'snap-1'}),
+        )
+        agent.mcp.capabilities['tok-1'] = SimpleNamespace(calls=0)
+        try:
+            yield conn
+        finally:
+            agent.mcp.capabilities.pop('tok-1', None)
+
+    monkeypatch.setattr(agent.mcp, 'connection', mock_connection)
+
+    async def scenario():
+        with pytest.raises(Exception) as exc:
+            await agent._chat(1, ChatRequest(message='test'), bad_scope, OptionsContext())
+        assert getattr(exc.value, 'status_code', None) == 503
+
+    asyncio.run(scenario())
+    assert len(captured_errors) == 1
+    assert isinstance(captured_errors[0], ValueError)
+    assert 'Unsupported scope: unsupported' in str(captured_errors[0])
