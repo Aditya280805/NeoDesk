@@ -1,16 +1,39 @@
 # Options chat, MCP and engineering harness
 
-## Unified routing and optional external tools
+## Unified routing, explicit specialists, and optional external tools
+
+The **Options chat** page exposes four choices in `Chat scope`:
+- **Options and trading** (`options_trading_analysis`, `scope: "chain"`) -> `POST /api/options-agent/chat`
+- **Portfolio analysis** (`portfolio_analysis`, `scope: "portfolio"`) -> `POST /api/options-agent/portfolio/chat`
+- **Portfolio risk** (`portfolio_risk`, `scope: "risk"`) -> `POST /api/options-agent/portfolio/risk/chat`
+- **Auto-select** (`master_router`) -> `POST /api/options-agent/unified-chat`
 
 `POST /api/options-agent/unified-chat` accepts `message`, optional `context`
-(`underlying`, `exchange`, `expiry`) and optional `conversation_id`. An Agno
-route-mode team chooses chain, portfolio, or clarification; the backend then
-creates only the selected user's existing scoped capability. The router is
-instructed to request clarification for mixed or unclear requests, but its
-classification may be wrong; users can use the existing scope-specific endpoints
-available. Changing scope requires a new conversation. Routing adds model calls
-and has its own limits and 25-second deadline. The existing website continues
-to use its explicit scope selector and scope-specific endpoints.
+(`underlying`, `exchange`, `expiry`), optional `conversation_id`, and optional
+`report_kind` / `report_id`. The tool-less `master_router` Agno team chooses
+`chain`, `portfolio`, `risk`, or `clarify`; when a specialist scope is selected,
+the backend constructs only that fresh per-request specialist and issues only
+that specialist's isolated private MCP capability. Mixed or ambiguous requests
+return `scope: "clarify"` (`agent_id: "master_router"`, `conversation_id: null`
+when starting a new chat, or preserving the active `conversation_id` on an
+ambiguous follow-up) with text only, no private tool calls, no evidence cards,
+and no new specialist conversation. Routing adds model calls, allows up to `85` seconds overall, and
+classification may still be wrong; users can always pick one of the three
+explicit specialists directly.
+
+Conversations remain strictly isolated by scope, specialist, and selected market.
+Changing the scope selector or market context in the UI invalidates any pending
+request and begins a fresh conversation so late replies cannot leak across scopes.
+When a `unified-chat` follow-up switches scope or market on an existing
+`conversation_id`, the backend returns HTTP `409` with structured detail:
+
+```json
+{"detail": {"code": "conversation_scope_changed", "message": "Start a new conversation after changing scope, specialist, or market selection."}}
+```
+
+On `409 conversation_scope_changed`, the **Options chat** UI keeps the typed
+draft in the composer, retains existing turns until the user explicitly clicks
+**New chat**, and never automatically resubmits.
 
 The root `mcp.json` starts empty. Administrators can configure trusted HTTPS
 Streamable HTTP servers with explicit allowed tool names and scopes:
@@ -62,7 +85,11 @@ For OpenAI instead, set `OPTIONS_AGENT_PROVIDER=openai`,
 (the default), a configured Gemini key takes precedence, then an OpenAI key.
 The corresponding model defaults are used when `OPTIONS_AGENT_MODEL` is unset.
 Provider/model mismatches appear as setup errors. A request never switches
-providers after a quota or authentication failure.
+providers after a quota or authentication failure. `OPTIONS_AGENT_PROVIDER=ollama`
+wires local OpenAI-compatible loopback transport (`http://127.0.0.1:11434/v1`,
+default `qwen3:4b`, `:cloud` tags blocked, `900` completion-token budget);
+however, local model availability, GPU capacity, and live Ollama answer quality
+remain deferred and unmeasured.
 
 `OPTIONS_AGENT_ENABLED=true` enables the feature; false leaves the rest of the
 terminal available. `OPTIONS_MCP_PORT=8766` is a loopback-only internal port.
@@ -77,38 +104,62 @@ OneDrive locked files in the existing environment during dependency installation
 The old environment's Starlette/Uvicorn versions were restored.
 
 Sign in to an individual website account, connect Kotak, and open **Options
-chat**. Select the underlying, exchange and optional expiry. Blank expiry uses
-the provider's default. Changing these controls starts a new conversation.
+chat**. Choose **Options and trading**, **Portfolio analysis**, **Portfolio risk**,
+or **Auto-select** under `Chat scope`. In option-chain or pre-routed Auto mode,
+select the underlying, exchange and optional expiry; blank expiry uses the
+provider's default. Changing the scope or market selection starts a new
+conversation. In **Auto-select**, periodic snapshot refresh stays disabled until
+routing lands on a concrete specialist (`chain`, `portfolio`, or `risk`).
 Legacy shared-password login alone cannot select a user's broker connection.
 Snapshots work without a model key; AI answers need both that key and real
 broker data. No sample data is substituted in the live feature.
 
 ## Architecture
 
-Browser -> authenticated options API -> runtime harness/Agno -> private MCP
-client -> Streamable HTTP MCP server -> SnapshotService -> user's Kotak session.
-The MCP listener shares the backend process and starts/stops with its lifespan.
-A startup failure marks options monitoring unavailable without taking down the site.
+Browser -> authenticated options API -> `AGENT_REGISTRY` per-request specialist
+factory + `RequestHarness` -> private MCP client -> Streamable HTTP MCP server ->
+SnapshotService -> user's Kotak session. The MCP listener shares the backend
+process and starts/stops with its lifespan. A startup failure marks options
+monitoring unavailable without taking down the site.
 
-The chain tool is `get_option_snapshot`, with no model-controlled arguments.
-Portfolio capabilities expose only `get_portfolio_snapshot` (see Phase 1 below).
-A random 65-second internal capability binds user, selected market and run.
+Active specialist registration lives in `backend/app/terminal/agent_registry.py`
+with per-request factory construction in `specialist_agents.py` and
+`unified_chat.py` (the legacy `options_monitor` catch-all agent and `build_agent`
+factory are retired):
+
+| Agent ID | Scopes | Endpoint | Private MCP Tool | UI Evidence Renderer |
+|---|---|---|---|---|
+| `options_trading_analysis` | `chain` | `POST /api/options-agent/chat` | `get_option_snapshot` | Market snapshot table/card |
+| `portfolio_analysis` | `portfolio` | `POST /api/options-agent/portfolio/chat` | `get_portfolio_analysis_snapshot` | `PortfolioEvidence` (no risk fields) |
+| `portfolio_risk` | `risk` | `POST /api/options-agent/portfolio/risk/chat` | `get_portfolio_risk_report` | `PortfolioRiskPanel` (no account sections) |
+| `master_router` | `clarify` or delegates | `POST /api/options-agent/unified-chat` | None (tool-less router) | Selected by validated scope; none for `clarify` |
+| `options_trading_analysis` | `strategy`, `scan`, `alert`, `backtest` | `POST /api/options-platform/explain` | `get_{kind}_report` | Saved report view |
+
+A random 65-second internal capability binds user, scope/market, and run.
 Every MCP HTTP request checks it; browser origins are rejected. The capability
 is revoked when the request ends and is never included in prompts or responses.
 This is an internal service protocol, not an externally connectable OAuth MCP
 service. Discovery and tool calls still use real MCP protocol messages.
 
-Each chat first retrieves validated evidence through MCP. The agent receives
-the same immutable snapshot as user-role data and can inspect it through its
-MCP tool. A per-request cache prevents inconsistent evidence or duplicate
-broker fetches. Snapshot refresh also goes through MCP and never calls the model.
+Each specialist chat first retrieves validated evidence through its scoped MCP
+tool. The agent receives the same immutable snapshot or report as user-role data
+and can inspect it through that tool. A per-request cache prevents inconsistent
+evidence or duplicate broker fetches. Manual **Refresh snapshot** calls
+`/api/options-agent/snapshot` (`chain`) or `/api/options-agent/portfolio/snapshot`
+(`portfolio` / `risk`) through MCP and never calls the model.
 
-Existing status/snapshot/chat/conversation endpoints remain. Status adds
-`model_configured`, `mcp_ready`, `enabled`, `provider`, `api_key_env`,
-`setup_error` and `generation_token_budget`. Chat adds `snapshot_ids`.
-`GET /api/options-agent/runs/{run_id}` returns sanitized diagnostics to its owner.
-Admitted failed requests include `X-Options-Run-Id` in the response headers for
-diagnostic lookup. Admission failures have no agent run ID.
+Existing status/snapshot/chat/conversation endpoints remain alongside the
+specialist and unified routes. `/status` reports `model_configured`, `mcp_ready`,
+`enabled`, `provider`, `api_key_env`, `setup_error`, `generation_token_budget`,
+and `registered_agents`. Specialist responses return `agent_id`, `run_id`,
+`parent_run_id` (linking `master_router` parent runs to delegated specialist
+runs), and scope-isolated citations (`snapshot_ids`, `evidence_ids`, or
+`risk_report_ids`).
+`GET /api/options-agent/runs/{run_id}` returns sanitized owner-scoped
+diagnostics (`stages`, `status`, `duration_ms`, versions, snapshot/evidence/report
+references, `risk_diagnostics`, and `harness` trace metrics). Admitted failed
+requests include `X-Options-Run-Id` in the response headers for diagnostic lookup.
+Admission failures have no agent run ID.
 Snapshots add `identity_verification`; fields absent from broker metadata are
 explicitly unverified. Supplied identity contradictions are rejected. Known
 expiry spellings are normalized for comparison; expiry selection sent to Kotak
@@ -118,29 +169,44 @@ still needs the provider-supported format.
 
 | Layer | Implementation | Control |
 |---|---|---|
-| Development | AGENTS.md, requirements.lock, CI | Reproducible checks and read-only architecture rules |
-| Data | options_snapshot.py | Shape/number validation, identity checks, deterministic OI arithmetic |
-| Permission/tool | options_mcp.py and options router | Individual identity, scoped capability, tool allowlist, no caller user ID |
-| Execution | options_agent.py, options_model.py | Deadlines, concurrency/rate/tool/token budgets, controlled failures |
-| Context/output | build_agent and AgentAnswer | Versioned instructions, untrusted data separation, validated snapshot references |
-| Evaluation | backend/evals and options_evals.py | Offline replay plus separate opt-in real-model evaluation |
-| Diagnostics | option_agent_runs SQLite table | Stages, status, duration, versions, snapshot reference, tool count and available tokens |
+| Development | AGENTS.md, requirements.lock, verification suite | Reproducible checks and read-only architecture rules |
+| Data | options_snapshot.py, portfolio_risk_*.py | Shape/number validation, identity checks, deterministic Decimal math |
+| Permission/tool | options_mcp.py, agent_scope.py, options router | Individual identity, scoped capability, projection-isolated tool allowlists, no caller user ID |
+| Execution | options_agent.py, unified_chat.py, agent_harness.py, options_model.py | Stage/cumulative deadlines, concurrency/rate/tool/token/context budgets, controlled failures |
+| Context/output | specialist_agents.py (`AGENT_REGISTRY`) + scoped answers | Per-request specialist factories, versioned instructions, untrusted data separation, validated UUID citations |
+| Evaluation | backend/evals, specialist_evals.py, options_evals.py, options_platform_evals.py | Offline contract/MCP replay plus separate opt-in live-model/live-broker evaluation |
+| Diagnostics | option_agent_runs SQLite table | Stages, status, duration, versions, `parent_run_id`, `harness` trace (`utf8-bytes-divided-by-3`), no prompts/secrets |
 
-Limits: one active request per user; six chat attempts/minute/user; four total
-active options requests; snapshot refresh at most once/five seconds/user.
-OpenAI has 900 completion tokens; Gemini has 4096 generation tokens including
-thinking. Both allow at most three model requests and two agent tool calls.
-MCP permits one initial prefetch plus those two calls. Gemini function-call IDs
-and thought signatures are preserved between model requests.
-Model HTTP timeout is 30 seconds, overall request deadline 60 seconds, and
-provider retries are disabled. Missing token usage reserves the remaining
-completion budget. Kotak SDK transport timeout is already ten seconds.
+Limits: one active request per user across explicit specialists, unified routing,
+and snapshot refresh; six chat/routing attempts/minute/user; four total active
+options requests; snapshot refresh at most once/five seconds/user.
+OpenAI and Ollama have `900` completion tokens; Gemini has `4096` generation
+tokens including thinking. Context sizing uses a conservative UTF-8 byte rule
+(`utf8-bytes-divided-by-3`) bounded by `input_limit=24000` and `context_limit=32768`.
+Each stage allows at most `3` model attempts (`3` total requests in explicit flows;
+`6` total across router + specialist in `Auto-select`). MCP permits at most `3`
+reads (`read_tool`: initial prefetch plus at most `2` model tool calls). Gemini
+function-call IDs and thought signatures are preserved between model requests.
+Model HTTP timeout is `30` seconds, overall request deadline is `60` seconds for
+explicit specialists and `85` seconds for `Auto-select`, and SDK retries remain
+disabled outside same-provider HTTP 429 backup-key rotation. Unknown provider
+token usage keeps its full reservation. Kotak SDK transport timeout is ten seconds.
 Synchronous broker work stays off the event loop; cancellation retains capacity
 until its worker actually finishes. A timeout does not imply the thread stopped.
 
+Sanitized trace interpretation (`GET /api/options-agent/runs/{run_id}` and
+`option_agent_runs`): `parent_run_id` links `master_router` parent runs to
+delegated specialist runs (and stays identical to `run_id` on direct explicit or
+clarification runs). Admitted failures attach `X-Options-Run-Id`. The `harness`
+block records allowlisted counters only (`attempts`, `tool_reads`, `broker_fetches`,
+`cache_hits`, `delegations`, `token_estimate_method`, and `stages.{router,specialist}`
+with `attempts`, `generation_spent`, `input_token_estimate`, `reported_output`,
+`unknown_usage`, `duration_ms`), without prompts, raw provider errors, or row data.
+
 Prompts use at most four earlier successful turns. Structured model output must
-cite exactly the current snapshot ID. Metrics displayed in the snapshot panel
-come from code. This validates evidence references, not the truth of every
+cite only current snapshot, evidence, or risk-report IDs for the active scope.
+Metrics displayed in the evidence/snapshot panels come from deterministic
+backend code. This validates evidence references, not the truth of every
 sentence: generated prose still requires evaluation and human judgment.
 
 Successful conversations retain their exact snapshots. Additive SQLite tables
@@ -167,34 +233,44 @@ automatic self-modification are outside this release.
 
 ## Verification and release gates
 
-From `backend/` using the updated environment:
+From `backend/` using the constrained harness environment:
 
 ```powershell
-python -m pip check
-python -m pytest tests -q
-python -m app.terminal.options_evals
+.venv-harness\Scripts\python.exe -m pip check
+.venv-harness\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
+.venv-harness\Scripts\python.exe -m app.terminal.specialist_evals --mode offline
+.venv-harness\Scripts\python.exe -m app.terminal.options_evals --scope chain
+.venv-harness\Scripts\python.exe -m app.terminal.options_evals --scope portfolio
+.venv-harness\Scripts\python.exe -m app.terminal.options_evals --scope portfolio-risk
+.venv-harness\Scripts\python.exe -m app.terminal.options_platform_evals
 ```
 
 From `frontend/`: `npm test`, `npm run lint`, `npm run build`.
-The repository-root GitHub workflow runs these on pushes and pull requests.
 Docker installs with the same constraints and includes the evaluation fixtures.
 
-Offline replay tests six cases through the actual MCP transport. The API
-integration tests run real Agno/OpenAI and Agno/Gemini serialization against controlled model
-HTTP responses and broker fixtures. They verify plumbing and controls, not
-actual model reliability or private broker connectivity.
+Offline replay tests deterministic specialist/MCP contracts, schema
+validation, routing invariants, and arithmetic (`model_evaluated=false`).
+`specialist_evals --mode offline` covers 18 split cases across `chain`,
+`portfolio`, `risk`, and `clarify`, while `options_evals` tests scope-specific
+datasets and `options_platform_evals` covers strategy/scan/alert/backtest
+explainers. The API integration tests run Agno/OpenAI and Agno/Gemini
+serialization against controlled model HTTP responses and broker fixtures.
+They verify plumbing and controls, NOT live model prose quality, Ollama local
+weights/availability, or private broker connectivity.
 
-Explicit real-model evaluation (uses the selected provider's API quota and may
-incur charges on a billed project; fixture market data):
+Explicit real-model evaluation (opt-in only; uses the selected provider's API
+quota or local endpoint and may incur charges on a billed project):
 
 ```powershell
+python -m app.terminal.specialist_evals --mode live-model
 python -m app.terminal.options_evals --mode live-model
 ```
 
-This checks evidence plus basic answer concepts/refusals for ratio, missing OI,
-missing Greeks, execution requests, provider injection and context switching.
-Regex rubrics are a regression aid; review answers before treating them as a
-comprehensive quality score. The default offline report says model_evaluated=false.
+Live-model checks evaluate evidence citations plus regex regression checks for
+ratio, missing OI, missing Greeks, execution refusals, provider injection, and
+context switching. Regex rubrics are a regression aid; review answers before
+treating them as a comprehensive quality score. Live Ollama benchmarking remains
+deferred and unmeasured.
 
 Explicit real-broker smoke: start the website, sign in and connect Kotak, set
 `OPTIONS_SMOKE_TOKEN` in your shell to your own authenticated website token,
@@ -215,12 +291,20 @@ unverified; offline tests must not be reported as substitutes.
 - `model_configured=false`: use the `api_key_env` and `setup_error` status fields
   to correct the selected provider's server configuration, then restart.
 - Gemini quota/auth/model errors: check the selected AI Studio project's quota,
-  key restrictions and model access. There is no provider fallback during a run.
+  key restrictions and model access. There is no provider fallback during a run
+  outside optional same-provider backup keys (`OPENAI_BACKUP_API_KEY` /
+  `GEMINI_BACKUP_API_KEY`).
 - 401: sign in to an individual account; shared login does not confer identity.
-- 409/429: wait for the current request or refresh/rate window to finish.
+- 409 `conversation_scope_changed`: follow-up no longer matches the bound
+  specialist/scope/market. The UI keeps your typed draft and offers **New chat**
+  without auto-resubmitting.
+- 409 concurrency / 429 rate limit: wait for the current request, 5-second
+  refresh cooldown, or 6/min rate window to clear.
 - 503: verify Kotak connection, selected market/expiry and model access. Inspect
-  owner-scoped run metadata for the last stage; raw provider text is suppressed.
-- 504: deadline reached; a broker worker may still hold its slot until completion.
+  owner-scoped run metadata (`GET /api/options-agent/runs/{run_id}`) for the
+  last stage; raw provider text is suppressed.
+- 504: deadline reached (`60`s explicit, `85`s Auto-select); a broker worker may
+  still hold its slot until completion.
 
 Future additions should begin with deterministic strategy tools and paper
 validation, then separately designed scheduling/alerts. Keep model evolution
@@ -228,16 +312,21 @@ outside the live runtime until versioned evaluations and promotion rules exist.
 
 ## Phase 1 portfolio evidence
 
-Portfolio chat is a second scope of the same Agno agent and admission harness.
-Select **Portfolio** on the options page; chain selection and portfolio sessions
-have separate conversations. The existing manual trading UI remains separately
-authorized and is not an agent tool.
+Portfolio analysis and portfolio risk now run as separate isolated specialists
+backed by `AGENT_REGISTRY` and scoped MCP projections under the unified
+admission harness. Select **Portfolio analysis** or **Portfolio risk** (or
+**Auto-select**) on the **Options chat** page; chain, portfolio, and risk
+sessions maintain separate conversations. The existing manual trading UI remains
+separately authorized and is not an agent tool.
 
-| Scope | Public authenticated routes under /api/options-agent | Private MCP tool |
-|---|---|---|
-| Chain | POST /snapshot, POST /chat | get_option_snapshot |
-| Portfolio | POST /portfolio/snapshot (empty body), POST /portfolio/chat | get_portfolio_snapshot |
-| Both | GET /status, GET /conversations/{id}, GET /runs/{id} | No execution or user-selection tool |
+| Scope | Agent ID | Public authenticated routes under /api/options-agent | Private MCP tool |
+|---|---|---|---|
+| Chain | `options_trading_analysis` | `POST /snapshot`, `POST /chat` | `get_option_snapshot` |
+| Portfolio | `portfolio_analysis` | `POST /portfolio/chat` | `get_portfolio_analysis_snapshot` |
+| Risk | `portfolio_risk` | `POST /portfolio/risk/chat` | `get_portfolio_risk_report` |
+| Auto-select | `master_router` | `POST /unified-chat` | None (tool-less router) |
+| Manual refresh | — | `POST /portfolio/snapshot` (empty body) | Scoped UI refresh (non-agent) |
+| All | — | `GET /status`, `GET /conversations/{id}`, `GET /runs/{id}` | No execution or user-selection tool |
 
 Public identity comes from the individual signed-in account. Portfolio tool
 arguments are empty; scope/user overrides and cross-scope conversation IDs are
@@ -266,11 +355,12 @@ non-atomic: retrieval start/finish and observation times do not imply simultaneo
 holdings, positions, orders and funds. A 15-second session cache avoids duplicate
 collection; a reuse gets a new evidence ID and cache age while retaining source
 observation times. Within one MCP capability, repeated reads return identical
-evidence. Refresh never rewrites earlier chat evidence. Both scopes share one
-active request/user, four global requests, six chat attempts/minute and a
-five-second refresh interval floor. Capability expiry is 65 seconds, at most
-three reads including prefetch; model tools are capped at two. The three-model-
-request, 30-second HTTP, 60-second overall and provider token budgets above apply.
+evidence. Refresh never rewrites earlier chat evidence. All specialists share
+one active request/user, four global requests, six chat/routing attempts/minute,
+and a five-second refresh interval floor. Capability expiry is 65 seconds, at
+most three reads including prefetch; model tools are capped at two. The three-
+model-request (six total in `Auto-select`), 30-second HTTP, 60-second explicit /
+85-second Auto deadline, and provider token budgets above apply.
 Cancellation keeps admission occupied until synchronous work actually finishes.
 
 Portfolio questions are 1–2000 characters; answers are at most 12000 characters
@@ -329,13 +419,17 @@ measured latency and unavailable (null) usage/cost.
 
 ## Phase 2 portfolio risk monitoring
 
-Portfolio responses now include an immutable portfolio-risk.v1 report tied to the
-current evidence UUID and captured policy revision. Settings start unset; disabled,
-unavailable and stale checks remain visible. Threshold equality passes; a pass is
-not account safety. Reports preserve exact decimal strings/null and do not derive
-account margin or account P&L from row totals. The live Kotak adapter currently
-supplies neither documented total-margin nor broker-day account-P&L semantics;
-those checks remain unavailable until a verified adapter mapping exists.
+`POST /api/options-agent/portfolio/risk/chat` (specialist `portfolio_risk`,
+`risk.1`) and manual refresh (`POST /api/options-agent/portfolio/snapshot`)
+produce an immutable portfolio-risk.v1 report tied to the current evidence UUID
+and captured policy revision; `POST /api/options-agent/portfolio/chat`
+(`portfolio_analysis`, `analysis.1`) omits risk findings to keep analysis and
+risk boundaries isolated. Settings start unset; disabled, unavailable and stale
+checks remain visible. Threshold equality passes; a pass is not account safety.
+Reports preserve exact decimal strings/null and do not derive account margin or
+account P&L from row totals. The live Kotak adapter currently supplies neither
+documented total-margin nor broker-day account-P&L semantics; those checks
+remain unavailable until a verified adapter mapping exists.
 
 Run the third offline gate from backend:
 

@@ -131,6 +131,7 @@ Execute this document as two fresh-context subplans:
 **Files:**
 - Modify: `frontend/src/pages/options-chat.tsx`
 - Modify: `frontend/tests/specialist-agents.test.cjs`
+- Read: `frontend/src/lib/api.ts` (`ApiError.status`, `ApiError.code`, and structured error messages are implemented by audit remediation).
 
 **Interfaces:**
 - Consumes: unified chat response scope/agent fields and `conversation_scope_changed` behavior from Part 1.

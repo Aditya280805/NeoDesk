@@ -10,6 +10,13 @@ export function clearLegacyAuthToken(): void {
   localStorage.removeItem('neodesk_token')
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public code?: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -27,7 +34,10 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   })
   if (!response.ok) {
     if(response.status===401&&!path.startsWith('/auth/')&&path!=='/session'&&typeof window!=='undefined')window.dispatchEvent(new Event('neodesk:session-expired'))
-    throw new Error(typeof data.detail==='string'?data.detail:`Request failed (${response.status})`)
+    const detail = data?.detail
+    const message = typeof detail === 'string' ? detail
+      : typeof detail?.message === 'string' ? detail.message : `Request failed (${response.status})`
+    throw new ApiError(message, response.status, typeof detail?.code === 'string' ? detail.code : undefined)
   }
   return data as T
 }

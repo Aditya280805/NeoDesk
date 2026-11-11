@@ -31,7 +31,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 import pytest
 from app.terminal import options_agent as module
-from app.terminal.agent_scope import PortfolioAnswer, PortfolioChatRequest, make_scope
+from app.terminal.agent_scope import PortfolioChatRequest
 from app.terminal.portfolio_risk_contracts import RiskPolicySettings, RiskPolicyUpdate
 from app.terminal.portfolio_risk_store import RiskStoreBusyError
 
@@ -96,13 +96,11 @@ def test_captured_policy_edit_affects_next_run_only(client,app,monkeypatch):
 
 
 def test_legacy_answer_and_history_remain_readable(client,app):
-    assert PortfolioAnswer.model_validate({'answer':'old','evidence_ids':[uuid4()]}).risk_report_ids==[]
     cid=str(uuid4());legacy={'schema_version':'portfolio.v1','scope':'portfolio'}
     with app.state.store.connect() as db:
         db.execute('INSERT INTO option_chat_conversations VALUES (?,?,?,?)',(cid,1,json.dumps(legacy),'old'))
         db.execute('INSERT INTO option_chat_turns(conversation_id,user_id,message,answer,evidence,created_at) VALUES (?,?,?,?,?,?)',(cid,1,'old question','old answer','{}','old'))
     assert client.get('/api/options-agent/conversations/'+cid).json()['turns'][0]['answer']=='old answer'
-    assert make_scope('portfolio',None).prompt_version=='portfolio.2'
     res = client.post('/api/options-agent/portfolio/chat',json={'message':'new','conversation_id':cid})
     assert res.status_code == 409
     assert 'conversation_scope_changed' in str(res.json()['detail'])

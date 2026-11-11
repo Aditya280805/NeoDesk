@@ -165,6 +165,8 @@ class OptionsMCP:
                         deadline_monotonic=capability.deadline_monotonic)
                 else:
                     work = asyncio.to_thread(self.snapshots.fetch, capability.user_id, capability.context)
+                if capability.harness:
+                    capability.harness.broker_fetches += 1
                 snapshot = await self._work(capability, lambda: None, coroutine=work)
                 if capability.deadline_monotonic <= time.monotonic():
                     raise ValueError('Request deadline expired')
@@ -196,6 +198,8 @@ class OptionsMCP:
                     capability.snapshot_json = serialized
                 else:
                     capability.snapshot_json = json.dumps(snapshot, allow_nan=False)
+            elif capability.harness:
+                capability.harness.cache_hits += 1
             result = json.loads(capability.snapshot_json)
             if capability.scope == 'portfolio_analysis':
                 from app.terminal.portfolio_contracts import PortfolioSnapshot

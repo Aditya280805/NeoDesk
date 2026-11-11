@@ -14,7 +14,7 @@ from app.auth.router import _clear_rate_limits
 from app.core.config import Settings
 from app.terminal import options_agent as module
 from app.terminal.agent_registry import AGENT_REGISTRY
-from app.terminal.agent_scope import PortfolioChatRequest, PortfolioAnswer, make_scope, specialist_scope
+from app.terminal.agent_scope import PortfolioChatRequest, specialist_scope
 from app.terminal import specialist_agents
 from app.terminal.server import create_app
 
@@ -46,13 +46,15 @@ def client(app):
         assert client.post('/api/auth/register', json={'email':'portfolio@example.com','password':'test-password-123','display_name':'Portfolio'}).status_code == 200
         yield client
 
-def test_portfolio_contract():
-    assert make_scope('portfolio', None).stored_context == {'schema_version':'portfolio.v1','scope':'portfolio'}
+def test_specialist_portfolio_contract():
     assert specialist_scope('portfolio', None).stored_context == {'scope': 'portfolio', 'agent_id': 'portfolio_analysis', 'contract_version': 'analysis.1'}
 
 def test_portfolio_authenticated_snapshot_chat_history(client, app):
     assert client.post('/api/options-agent/portfolio/snapshot',json={'underlying':'NIFTY'}).status_code == 422
     assert client.post('/api/options-agent/portfolio/snapshot').status_code == 200
+    with app.state.store.connect() as db:
+        detail = json.loads(db.execute("SELECT detail FROM option_agent_runs WHERE kind='snapshot' ORDER BY created_at DESC LIMIT 1").fetchone()[0])
+    assert detail['prompt_version'] == 'snapshot.portfolio.1'
     reply = client.post('/api/options-agent/portfolio/chat', json={'message':'Summarize'})
     assert reply.status_code == 200, reply.text
     body = reply.json()
@@ -241,8 +243,8 @@ def test_generation_rechecked_immediately_before_persistence(client,app,monkeypa
 
 
 def test_scope_instructions_are_static_and_enforce_read_only():
-    instructions=' '.join(make_scope('portfolio',None).instructions)
-    for term in ('unavailable', 'empty', 'zero', 'trades', 'strategy', 'freshness', 'untrusted'):
+    instructions=' '.join(specialist_scope('portfolio',None).instructions)
+    for term in ('unavailable', 'zero', 'orders', 'freshness', 'untrusted'):
         assert term in instructions
     assert 'previous-untrusted' not in instructions
 

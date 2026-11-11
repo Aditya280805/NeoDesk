@@ -37,22 +37,28 @@ class UnifiedChatRequest(BaseModel):
 
 
 class RoutingLimiter:
-    def __init__(self):
-        self.lock = Lock()
-        self.active = set()
-        self.recent = deque()
+    def __init__(self, service=None):
+        self.service = service
+        self.lock = service.guard if service else Lock()
+        self.active = service.active if service else set()
+        self.recent = service.recent if service else deque()
 
     def enter(self, user_id):
         with self.lock:
             now = time.monotonic()
             while self.recent and self.recent[0][0] < now - 60:
                 self.recent.popleft()
-            if user_id in self.active or len(self.active) >= 4 or sum(uid == user_id for _, uid in self.recent) >= 6:
+            refresh = self.service.refresh_active if self.service else set()
+            pending = self.service.mcp.pending if self.service else {}
+            if user_id in self.active or user_id in refresh or user_id in pending or len(self.active | refresh) >= 4 or sum(uid == user_id for _, uid in self.recent) >= 6:
                 raise HTTPException(429, 'Chat routing is busy. Please wait before retrying.')
             self.active.add(user_id)
             self.recent.append((now, user_id))
 
     def leave(self, user_id):
+        if self.service:
+            self.service._release(user_id, self.active)
+            return
         with self.lock:
             self.active.discard(user_id)
 
@@ -168,7 +174,7 @@ def _record_parent_run(service, user_id, run_id, status, started, detail):
         try:
             record_fn(user_id, run_id, 'unified_chat', status, started, dict(detail))
         except Exception:
-            pass
+            logger.warning('Parent run trace write failed')
     elif hasattr(service, 'store') and service.store:
         try:
             from datetime import UTC, datetime
@@ -181,7 +187,7 @@ def _record_parent_run(service, user_id, run_id, status, started, detail):
                     (run_id, user_id, 'unified_chat', status, created, json.dumps(d, allow_nan=False)),
                 )
         except Exception:
-            pass
+            logger.warning('Parent run trace write failed')
 
 
 async def dispatch_unified(service, user_id, body):
@@ -258,6 +264,8 @@ async def dispatch_unified(service, user_id, body):
     input_limit = getattr(service.config, 'agent_input_token_estimate_limit', 24000) if hasattr(service, 'config') and service.config else 24000
     context_limit = getattr(service.config, 'agent_context_token_limit', 32768) if hasattr(service, 'config') and service.config else 32768
     harness = RequestHarness(auto=True, input_limit=input_limit, context_limit=context_limit)
+    harness.admission_owner = (service, user_id) if limiter else None
+    harness.delegations = 0
     parent_detail = {
         'stages': ['routing'],
         'agent_id': 'master_router',
@@ -316,6 +324,7 @@ async def dispatch_unified(service, user_id, body):
                 })
 
             parent_detail['stages'].append('specialist')
+            harness.delegations += 1
             if routed_scope == 'chain':
                 result = await service.chat(
                     user_id,

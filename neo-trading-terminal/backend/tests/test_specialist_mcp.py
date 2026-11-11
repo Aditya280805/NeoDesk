@@ -53,10 +53,12 @@ def test_specialist_projection_is_detached_cached_and_scoped(scope, tool):
     async def scenario():
         collector = service()
         runtime = OptionsMCP(Mock(), port=0, portfolio_service=collector)
+        from app.terminal.agent_harness import RequestHarness
+        harness = RequestHarness()
         async with runtime.lifespan():
             assert runtime.ready
             async with runtime.connection(42, None, 'specialist', scope=scope,
-                    risk_policy=RiskPolicy(revision=0), session_generation='g') as conn:
+                    risk_policy=RiskPolicy(revision=0), session_generation='g', harness=harness) as conn:
                 assert [t.name for t in await conn.tools.session.list_tools()] == [tool]
                 first = await conn._snapshot(tool)
                 if scope == 'portfolio_analysis':
@@ -69,6 +71,8 @@ def test_specialist_projection_is_detached_cached_and_scoped(scope, tool):
                 second = await conn._snapshot(tool)
                 assert 'forged' not in str(second)
                 assert collector.fetch.call_count == 1
+                assert harness.broker_fetches == 1
+                assert harness.cache_hits == 1
                 for forbidden in ('get_portfolio_snapshot', 'get_option_snapshot',
                         'get_strategy_report', 'get_scan_report', 'get_alert_report', 'get_backtest_report',
                         'get_portfolio_risk_report' if scope == 'portfolio_analysis' else 'get_portfolio_analysis_snapshot'):

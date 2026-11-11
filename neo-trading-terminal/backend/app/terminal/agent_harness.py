@@ -38,6 +38,7 @@ def bounded_context(required, history, *, input_limit=24000):
 @dataclass
 class StageBudget:
     generation_limit: int
+    input_token_estimate: int = 0
     attempts: int = 0
     generation_spent: int = 0
     reported_output: int = 0
@@ -53,6 +54,10 @@ class RequestHarness:
     context_limit: int = 32768
     attempts: int = 0
     tool_reads: int = 0
+    broker_fetches: int = 0
+    cache_hits: int = 0
+    delegations: int = 0
+    admission_owner: object = field(default=None, repr=False)
     stages: dict[str, StageBudget] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -81,6 +86,7 @@ class RequestHarness:
             raise HarnessError('model_budget')
         self.attempts += 1
         budget.attempts += 1
+        budget.input_token_estimate += input_estimate
         budget.generation_spent += allowance
         return budget, allowance
 
@@ -106,9 +112,12 @@ class RequestHarness:
         # Construct from allowlisted numeric fields; never accept arbitrary
         # provider metadata, errors, prompts or evidence in this export.
         return {'attempts': self.attempts, 'tool_reads': self.tool_reads,
+            'broker_fetches': self.broker_fetches, 'cache_hits': self.cache_hits,
+            'delegations': self.delegations,
             'token_estimate_method': 'utf8-bytes-divided-by-3',
             'stages': {name: {'attempts': value.attempts,
                 'generation_spent': value.generation_spent,
+                'input_token_estimate': value.input_token_estimate,
                 'reported_output': value.reported_output,
                 'unknown_usage': value.unknown_usage,
                 'duration_ms': round(value.duration_ms, 3)}
@@ -156,8 +165,12 @@ async def bounded_invoke(invoke, generation_limit, *args, reasoning=False, **kwa
     except TimeoutError:
         harness.account(ticket, None)
         raise HarnessError('timeout') from None
-    except BaseException:
-        harness.account(ticket, None)
+    except BaseException as error:
+        from agno.exceptions import ModelProviderError
+        # An explicit quota rejection precedes generation. Transport errors and
+        # cancellation have unknown usage and keep their full reservation.
+        rejected = isinstance(error, ModelProviderError) and error.status_code == 429
+        harness.account(ticket, 0 if rejected else None)
         raise
     finally:
         ticket[0].duration_ms += (time.monotonic()-started)*1000

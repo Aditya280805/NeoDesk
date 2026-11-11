@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from app.terminal.agent_registry import register_agent, list_agents
-from app.terminal.agent_scope import PortfolioChatRequest, PortfolioAnswer, AgentAnswer, make_scope, ReportAnswer, report_scope
+from app.terminal.agent_scope import PortfolioChatRequest, AgentAnswer, ReportAnswer, report_scope
 from app.terminal.options_report_context import REPORT_KINDS, load_report, bounded_report
 from app.terminal.options_snapshot import ChatRequest, OptionsContext, SnapshotService, normalize_snapshot
 from app.terminal.options_mcp import OptionsMCP, TOOL_VERSION
@@ -25,7 +25,7 @@ from app.terminal.agent_registry import get_agent
 from app.terminal import specialist_agents  # register fresh specialist factories
 from app.terminal import unified_chat  # register master_router factory
 
-PROMPT_VERSION = '2'
+RUN_CONTRACT_VERSION = 'snapshot.1'
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +34,6 @@ class OptionsAgent:
 
     def __init__(self, config, store, market, *, portfolio_service=None, risk_store=None):
         from app.terminal.unified_chat import RoutingLimiter
-        self.routing_limiter = RoutingLimiter()
         self.config, self.store, self.market = config, store, market
         from app.terminal.portfolio_risk_store import PortfolioRiskStore
         self.risk_store = risk_store if risk_store is not None else PortfolioRiskStore(store)
@@ -43,6 +42,7 @@ class OptionsAgent:
         self.workers = {}
         self.recent = deque()
         self.refresh_active = set()
+        self.routing_limiter = RoutingLimiter(self)
         self.refresh_last = {}
         self.mcp = OptionsMCP(SnapshotService(market), config.options_mcp_port, portfolio_service=portfolio_service)
         with store.connect() as db:
@@ -77,7 +77,7 @@ class OptionsAgent:
         detail['duration_ms'] = round((time.monotonic() - started) * 1000)
         provider = provider_settings(self.config)
         detail.update(model=provider.model, provider=provider.provider, generation_token_budget=provider.token_budget,
-                      prompt_version=detail.get("prompt_version", PROMPT_VERSION), tool_version=TOOL_VERSION)
+                      prompt_version=detail.get("prompt_version", RUN_CONTRACT_VERSION), tool_version=TOOL_VERSION)
         with (self.store.connect() if db is None else nullcontext(db)) as db:
             db.execute('INSERT INTO option_agent_runs VALUES (?,?,?,?,?,?)',
                        (run_id, user_id, kind, status, datetime.now(UTC).isoformat(), json.dumps(detail, allow_nan=False)))
@@ -188,7 +188,7 @@ class OptionsAgent:
                 raise HTTPException(429, 'Options monitoring is busy. Try again shortly.')
             self.refresh_active.add(user_id)
             self.refresh_last[user_id] = started
-        detail, state = {'stages': ['mcp'], 'scope': scope, 'prompt_version': make_scope(scope, context).prompt_version}, 'failed'
+        detail, state = {'stages': ['mcp'], 'scope': scope, 'prompt_version': f'snapshot.{scope}.1'}, 'failed'
         try:
             async with asyncio.timeout_at(deadline):
                 policy = await self._locked_worker(user_id, deadline, lambda check: self.risk_store.get_policy(user_id)) if scope == 'portfolio' else None
@@ -325,12 +325,14 @@ class OptionsAgent:
             stamp = time.monotonic()
             while self.recent and self.recent[0][0] < stamp - 60:
                 self.recent.popleft()
-            if user_id in self.active or user_id in self.refresh_active or user_id in self.mcp.pending:
+            inherited_admission = harness is not None and harness.admission_owner == (self, user_id)
+            if not inherited_admission and (user_id in self.active or user_id in self.refresh_active or user_id in self.mcp.pending):
                 raise HTTPException(409, 'An options request is already running. Please wait.')
-            if sum(uid == user_id for _, uid in self.recent) >= 6 or len(self.active) + len(self.refresh_active) >= 4:
+            if not inherited_admission and (sum(uid == user_id for _, uid in self.recent) >= 6 or len(self.active) + len(self.refresh_active) >= 4):
                 raise HTTPException(429, 'Options chat is busy. Please wait a minute before retrying.')
             self.active.add(user_id)
-            self.recent.append((stamp, user_id))
+            if not inherited_admission:
+                self.recent.append((stamp, user_id))
         run_id, conversation_id = str(uuid4()), str(body.conversation_id or uuid4())
         effective_parent_run_id = parent_run_id or run_id
         detail, state = {'stages': [], 'scope': scope, 'prompt_version': definition.prompt_version,
@@ -531,5 +533,6 @@ class OptionsAgent:
             try:
                 await self._finish(user_id, run_id, 'chat', state, started, detail, deadline)
             finally:
-                self._release(user_id, self.active)
+                if not inherited_admission:
+                    self._release(user_id, self.active)
                 options_run.reset(log_context)

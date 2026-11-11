@@ -33,7 +33,8 @@
 .options-composer textarea{width:100%;min-width:0;resize:vertical;min-height:70px;max-height:180px;padding:12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:inherit;font:inherit;font-size:13px;line-height:1.6}
 .options-composer textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
 .options-composer>small{display:block;font-size:10px;color:var(--muted);margin-top:10px;line-height:1.6}
-.options-chat-error{margin:15px 22px;font-size:12px}
+.options-chat-error{margin:15px 22px;font-size:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.options-chat-error button{flex-shrink:0;white-space:nowrap}
 .options-snapshot{min-width:0}
 .options-snapshot .section-heading{gap:9px;flex-wrap:wrap}
 .options-snapshot .badge{font-size:8px}
