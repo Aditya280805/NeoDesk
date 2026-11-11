@@ -320,7 +320,7 @@ class Market:
             except Exception:
                 raise BrokerError(f'Could not import {segment}; the previous catalogue is unchanged.') from None
         self.store.save_catalogue(all_rows, SEGMENTS)
-        self.store.audit(1, 'catalogue_sync', f'Imported {len(all_rows)} instruments across NSE/BSE cash and derivatives.')
+        self.store.audit(user_id, 'catalogue_sync', f'Imported {len(all_rows)} instruments across NSE/BSE cash and derivatives.')
         return self.store.metadata()
 
     def quotes(self, identifiers, user_id: int = 1):

@@ -59,7 +59,18 @@ class PaperAccount:
             if user_id is None:
                 user_id = kwargs.get('user_id', 1)
 
-
+        if user_id is None or isinstance(user_id, bool) or not isinstance(user_id, int) or user_id < 1:
+            raise ValueError('Valid user account is required.')
+        if not isinstance(instrument, dict):
+            raise ValueError('Valid instrument is required.')
+        if side not in ('BUY', 'SELL'):
+            raise ValueError("Order side must be 'BUY' or 'SELL'.")
+        if order_type not in ('MARKET', 'LIMIT'):
+            raise ValueError("Order type must be 'MARKET' or 'LIMIT'.")
+        if isinstance(quantity, bool) or not isinstance(quantity, int):
+            raise ValueError('Quantity must be a positive integer.')
+        if order_type == 'LIMIT' and price is None:
+            raise ValueError('A limit order needs a limit price.')
 
         if not contract_open(instrument):
             raise ValueError('This contract has expired or its expiry is unknown. Choose an active contract.')
@@ -173,8 +184,6 @@ class PaperAccount:
             user_id = int(user_id_or_quotes)
         with self.store.connect() as db:
             acc_row = db.execute('SELECT * FROM account WHERE user_id=?', (user_id,)).fetchone()
-            if not acc_row:
-                acc_row = db.execute('SELECT * FROM account WHERE id=1').fetchone()
             account = dict(acc_row) if acc_row else {'initial': 0, 'cash': 0, 'realized': 0}
             rows = [dict(r) for r in db.execute('SELECT * FROM positions WHERE user_id=? AND quantity>0', (user_id,))]
             account['reserved'] = db.execute("SELECT COALESCE(SUM(quantity*limit_price),0) FROM orders WHERE user_id=? AND status='OPEN' AND side='BUY'", (user_id,)).fetchone()[0]

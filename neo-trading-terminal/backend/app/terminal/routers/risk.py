@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+from app.auth.dependencies import get_request_user_id
 from app.terminal.risk import RiskLimits
 
 risk_router = APIRouter()
@@ -9,8 +10,7 @@ class KillSwitchRequest(BaseModel):
     reason: str = Field(default='Stopped from your dashboard',min_length=1,max_length=300)
 
 def context(request):
-    user=getattr(request.state,'user',None)
-    uid=user['id'] if user else 1
+    uid=get_request_user_id(request)
     return request.app.state.risk_manager.for_user(uid),uid
 
 @risk_router.get('/api/risk/status')

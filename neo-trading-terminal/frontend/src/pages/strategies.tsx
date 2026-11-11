@@ -20,6 +20,7 @@ export default function Strategies() {
   const [instrument, setInstrument] = useState<Instrument | null>(null)
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState('')
+  const [activeError, setActiveError] = useState('')
   const [busy, setBusy] = useState(false)
   const [activeStrategies, setActiveStrategies] = useState<ActiveStrategy[]>([])
   const { tradingMode, signals, riskAlerts } = useMarketStore()
@@ -27,22 +28,43 @@ export default function Strategies() {
   async function fetchActive() {
     try {
       setActiveStrategies(await api<ActiveStrategy[]>('/strategies/active'))
-    } catch(e) {
-      // ignore silently for background refresh
+      setActiveError('')
+    } catch (e) {
+      setActiveError(failure(e))
     }
   }
 
   useEffect(() => {
     let mounted = true;
-    async function load() {
+    async function load(force = false) {
+      if (!force && typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
         const data = await api<ActiveStrategy[]>('/strategies/active');
-        if (mounted) setActiveStrategies(data);
-      } catch(e) {}
+        if (mounted) {
+          setActiveStrategies(data);
+          setActiveError('');
+        }
+      } catch (e) {
+        if (mounted) setActiveError(failure(e));
+      }
     }
-    void load();
-    const interval = setInterval(load, 5000);
-    return () => { mounted = false; clearInterval(interval); };
+    void load(true);
+    const interval = setInterval(() => { void load(); }, 5000);
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void load(true);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility);
+    }
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
+    };
   }, []);
 
   async function run(e: FormEvent<HTMLFormElement>) {
@@ -94,20 +116,22 @@ export default function Strategies() {
   }
 
   async function stopStrategy(id: string) {
+    setActiveError('')
     try {
       await api(`/strategies/${id}`, 'DELETE')
       await fetchActive()
     } catch (e) {
-      console.error(e)
+      setActiveError(failure(e))
     }
   }
 
   async function pauseStrategy(id: string) {
+    setActiveError('')
     try {
       await api(`/strategies/${id}/pause`, 'POST')
       await fetchActive()
     } catch (e) {
-      console.error(e)
+      setActiveError(failure(e))
     }
   }
 
@@ -122,7 +146,9 @@ export default function Strategies() {
         </div>
         <span className="badge">ALGO ENGINE</span>
       </div>
-      
+
+      {activeError && <p className="error" role="alert">{activeError}</p>}
+
       {activeStrategies.length > 0 && (
         <section className="panel padded" style={{marginBottom: '2rem'}}>
           <h2>Active Deployments</h2>

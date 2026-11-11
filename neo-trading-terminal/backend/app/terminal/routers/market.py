@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from typing import Literal
 from pydantic import BaseModel, Field
+from app.auth.dependencies import get_request_user_id as get_user_id
 from app.brokers.base_broker import BrokerError
 import json
 from app.terminal.analytics import indicators
@@ -10,10 +11,6 @@ market_router = APIRouter()
 
 class QuoteRequest(BaseModel):
     ids: list[str] = Field(max_length=50)
-
-def get_user_id(request: Request) -> int:
-    user = getattr(request.state, 'user', None)
-    return user['id'] if user else 1
 
 @market_router.get('/api/instruments')
 def instruments(request: Request, q: str='',exchange: str='',kind: str='',sort: Literal['name','name_desc','symbol','symbol_desc','exchange','kind']='symbol',offset: int=0,limit: int=40):

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from typing import Literal, Any
 from pydantic import BaseModel, Field
+from app.auth.dependencies import get_request_user_id as get_user_id
 from app.brokers.base_broker import BrokerError
 from app.terminal.analytics import backtest
 
@@ -24,10 +25,6 @@ class DeployRequest(BaseModel):
     slow: int = Field(default=50,ge=3,le=200)
     initial: float = Field(default=100000,ge=100,allow_inf_nan=False)
     mode: Literal['paper', 'live'] = 'paper'
-
-def get_user_id(request: Request) -> int:
-    user = getattr(request.state, 'user', None)
-    return user['id'] if user else 1
 
 @strategy_router.post('/api/strategies/backtest')
 def strategy(request: Request, body: BacktestRequest):

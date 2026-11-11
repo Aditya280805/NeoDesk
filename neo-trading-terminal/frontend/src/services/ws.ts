@@ -5,17 +5,31 @@ class WebSocketService {
     private ws: WebSocket | null = null;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private isIntentionallyClosed = false;
+    private reconnecting = false; // Prevent multiple reconnection attempts
 
     private getWsUrl() {
         const base = apiBase();
+        const token = this.getAuthToken();
+        const query = token ? `?token=${encodeURIComponent(token)}` : '';
+        
         if (base) {
-            return base.replace(/^http/, 'ws') + '/api/ws/stream';
+            return base.replace(/^http/, 'ws') + '/api/ws/stream' + query;
         }
         if (typeof window !== 'undefined') {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            return `${protocol}//${window.location.host}/api/ws/stream`;
+            return `${protocol}//${window.location.host}/api/ws/stream` + query;
         }
         return '';
+    }
+
+    private getAuthToken(): string | null {
+        if (typeof document === 'undefined') return null;
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === 'neodesk_token') return value;
+        }
+        return null;
     }
 
     connect() {
@@ -28,11 +42,17 @@ class WebSocketService {
         if (!url) return;
 
         this.isIntentionallyClosed = false;
+        this.reconnecting = false;
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         const socket = new WebSocket(url);
         this.ws = socket;
 
         this.ws.onopen = () => {
             if (this.ws !== socket) return;
+            this.reconnecting = false;
             useMarketStore.getState().setConnected(true);
             if (this.reconnectTimer) {
                 clearTimeout(this.reconnectTimer);
@@ -71,18 +91,23 @@ class WebSocketService {
     }
 
     private attemptReconnect() {
-        if (this.isIntentionallyClosed) return;
+        if (this.isIntentionallyClosed || this.reconnecting) return;
         
         if (!this.reconnectTimer) {
+            this.reconnecting = true;
             this.reconnectTimer = setTimeout(() => {
                 this.reconnectTimer = null;
-                this.connect();
+                this.reconnecting = false;
+                if (!this.isIntentionallyClosed) {
+                    this.connect();
+                }
             }, 3000);
         }
     }
 
     disconnect() {
         this.isIntentionallyClosed = true;
+        this.reconnecting = false;
         useMarketStore.getState().setConnected(false);
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);

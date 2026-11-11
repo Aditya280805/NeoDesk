@@ -33,8 +33,9 @@ from app.terminal.market import Market
 from app.terminal.discovery import Discovery
 from app.terminal.engine import StrategyEngine
 from app.terminal.risk import RiskManager
+from app.auth.dependencies import get_request_user_id
 from app.auth.service import decode_token
-from app.auth.router import auth_router
+from app.auth.router import _check_rate_limit, auth_router
 
 class Credentials(BaseModel):
     consumer_key: SecretStr
@@ -54,6 +55,8 @@ class Password(BaseModel):
 def create_app(config: Settings):
     if config.environment == 'production' and (not config.app_password or len(config.app_password.get_secret_value())<16):
         raise RuntimeError('Set a private APP_PASSWORD of at least 16 characters before deploying.')
+    if config.environment == 'production' and len(config.jwt_secret.strip()) < 16:
+        raise RuntimeError('Set a JWT_SECRET of at least 16 characters before deploying.')
     store = Store(config.data_dir / 'terminal.sqlite3', config.paper_starting_balance)
     portfolio_risk_store = PortfolioRiskStore(store)
     market = Market(config,store)
@@ -66,11 +69,13 @@ def create_app(config: Settings):
         store.update_strategy_state(strategy['id'],strategy['cash'],strategy['held'],status='PAUSED')
     strategy_engine = StrategyEngine(store, market, paper, risk_manager=risk_manager)
     sessions, attempts = {}, {}
+    attempts_lock = Lock()
     sync_lock = Lock()
     lifespan_lock = Lock()
     sync_status = {'running':False,'error':None}
+    sync_status_by_user: dict[int, dict] = {}
 
-    def quote_map(ids,user_id=1):
+    def quote_map(ids, user_id: int):
         result={}
         for start in range(0,len(ids),50):
             result.update({q['id']:q for q in market.quotes(ids[start:start+50],user_id=user_id)})
@@ -167,6 +172,7 @@ def create_app(config: Settings):
     app.state.options_backtest_service = BacktestService(app.state.options_platform_store)
     app.state.catalogue_lock = sync_lock
     app.state.catalogue_sync = sync_status
+    app.state.catalogue_sync_by_user = sync_status_by_user
     app.state.is_production = (config.environment == 'production')
     app.add_middleware(CORSMiddleware,allow_origins=[config.frontend_url],allow_credentials=True,
                        allow_methods=['GET','POST','PUT','DELETE'],allow_headers=['Content-Type','X-NeoDesk','Authorization'])
@@ -199,8 +205,14 @@ def create_app(config: Settings):
         # 2. Backward compatibility fallback: APP_PASSWORD flow
         if config.app_password:
             token = request.cookies.get('neodesk_session', '')
-            return sessions.get(hashlib.sha256(token.encode()).hexdigest(), 0) > time.time()
-        return config.environment == 'test' and request.client and request.client.host in ('127.0.0.1', '::1', 'testclient')
+            if sessions.get(hashlib.sha256(token.encode()).hexdigest(), 0) > time.time():
+                request.state.legacy_user_id = 1
+                return True
+            return False
+        if config.environment == 'test' and request.client and request.client.host in ('127.0.0.1', '::1', 'testclient'):
+            request.state.legacy_user_id = 1
+            return True
+        return False
 
     @app.middleware('http')
     async def protect(request: Request, call_next):
@@ -226,7 +238,7 @@ def create_app(config: Settings):
     async def websocket_endpoint(websocket: WebSocket):
         token = websocket.query_params.get('token') or websocket.cookies.get('neodesk_token')
         auth_ok = False
-        user_id = 1
+        user_id = None
         if token:
             try:
                 payload = decode_token(token, config.jwt_secret)
@@ -235,22 +247,26 @@ def create_app(config: Settings):
                     user_id = payload['user_id']
             except Exception:
                 pass
-        if not token and config.app_password:
+        elif config.app_password:
             legacy_token = websocket.cookies.get('neodesk_session', '')
             if sessions.get(hashlib.sha256(legacy_token.encode()).hexdigest(), 0) >= time.time():
                 auth_ok = True
-        elif not token and not config.app_password and config.environment == 'test':
+                user_id = 1
+        elif config.environment == 'test':
             auth_ok = True
+            user_id = 1
 
-        if not auth_ok:
+        if not auth_ok or user_id is None:
             await websocket.close(code=1008)
             return
-        
-        await manager.connect(websocket,user_id=user_id)
+
+        await manager.connect(websocket, user_id=user_id)
         try:
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
+            pass
+        finally:
             manager.disconnect(websocket)
 
     @app.exception_handler(RequestValidationError)
@@ -276,11 +292,8 @@ def create_app(config: Settings):
 
     @app.post('/api/login')
     def login(body: Password,request: Request,response: Response):
-        address=request.client.host
-        recent=[t for t in attempts.get(address,[]) if time.time()-t<60]
-        if len(recent)>=5:
-            raise HTTPException(429,'Wait a minute before trying again.')
-        attempts[address]=recent+[time.time()]
+        address=request.client.host if request.client else 'unknown'
+        _check_rate_limit(attempts, address, 5, 'login', lock=attempts_lock)
         if not config.app_password or not secrets.compare_digest(body.password.get_secret_value(),config.app_password.get_secret_value()):
             raise HTTPException(401,'Incorrect terminal password.')
         token=secrets.token_urlsafe(32)
@@ -300,10 +313,7 @@ def create_app(config: Settings):
         return {'ok':True}
 
     def get_req_user_id(request: Request | None) -> int:
-        if not request:
-            return 1
-        user = getattr(request.state, 'user', None)
-        return user['id'] if user else 1
+        return get_request_user_id(request)
 
     @app.get('/api/status')
     def status(request: Request = None):
@@ -312,7 +322,8 @@ def create_app(config: Settings):
         return {'mode':'paper','live_trading_enabled':config.live_trading_enabled,'market_data_source':sess.source,
                 'kotak_api_key_configured':bool(sess.config.kotak_consumer_key),
                 'broker_authenticated':sess.broker.is_authenticated,'catalogue':store.metadata(),
-                'catalogue_sync':sync_status,'paper_starting_balance':config.paper_starting_balance,
+                'catalogue_sync':sync_status_by_user.get(uid, {'running':False,'error':None}),
+                'paper_starting_balance':config.paper_starting_balance,
                 'market_error':sess.last_error,'orders_stopped':risk_manager.for_user(uid).kill_switch_active}
 
     @app.post('/api/connection')
@@ -352,26 +363,39 @@ def create_app(config: Settings):
                 'positions':[{k:r.get(k) for k in allowed if k in r} for r in records if isinstance(r,dict)]}
 
 
-    async def do_sync(user_id=1):
+    async def do_sync(user_id: int):
+        user_status = sync_status_by_user.setdefault(user_id, {'running': True, 'error': None})
         try:
-            await run_in_threadpool(market.sync,user_id=user_id)
+            await run_in_threadpool(market.sync, user_id=user_id)
         except Exception:
-            sync_status['error']='Catalogue sync failed. Check the broker connection and retry; previous catalogue retained.'
+            msg = 'Catalogue sync failed. Check the broker connection and retry; previous catalogue retained.'
+            user_status['error'] = msg
+            sync_status['error'] = msg
         finally:
-            sync_status['running']=False
-            sync_lock.release()
+            user_status['running'] = False
+            sync_status['running'] = False
+            if sync_lock.locked():
+                sync_lock.release()
 
-    @app.post('/api/instruments/sync',status_code=202)
+    @app.post('/api/instruments/sync', status_code=202)
     async def sync(request: Request = None):
         uid = get_req_user_id(request)
         sess = market.get_session(uid)
-        if sess.source != 'kotak' and market.source != 'kotak':
-            raise ValueError('Connect Kotak first.')
+        if sess.source != 'kotak' and not (uid == 1 and market.source == 'kotak'):
+            raise HTTPException(400, 'Connect Kotak first.')
         if not sync_lock.acquire(blocking=False):
-            raise HTTPException(409,'Catalogue sync is already running.')
-        sync_status.update(running=True,error=None)
-        asyncio.create_task(do_sync(uid))
-        return {'running':True}
+            raise HTTPException(409, 'Catalogue sync is already running.')
+        sync_status_by_user[uid] = {'running': True, 'error': None}
+        sync_status.update(running=True, error=None)
+        try:
+            asyncio.create_task(do_sync(uid))
+        except Exception:
+            sync_status_by_user[uid]['running'] = False
+            sync_status['running'] = False
+            if sync_lock.locked():
+                sync_lock.release()
+            raise
+        return {'running': True}
 
     
     from app.terminal.routers.market import market_router
