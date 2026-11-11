@@ -1,0 +1,19 @@
+{
+  "agent_id": "master_router",
+  "endpoint": "/api/options-agent/unified-chat",
+  "method": "POST",
+  "request": {
+    "message": "Hello, what can you help me with?"
+  },
+  "response": {
+    "agent_id": "master_router",
+    "answer": "Please ask separately about an option chain, portfolio analysis, or portfolio risk.",
+    "conversation_id": null,
+    "parent_run_id": "62796905-7b10-4897-8788-5d17e31ec806",
+    "read_only": true,
+    "run_id": "62796905-7b10-4897-8788-5d17e31ec806",
+    "scope": "clarify"
+  },
+  "scope": "clarify",
+  "status_code": 200
+}

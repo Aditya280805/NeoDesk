@@ -5,7 +5,7 @@ Branch: `codex/local-specialist-agents`
 
 ## Resume here
 
-Implementation is IN PROGRESS. Do not mark Part 1 complete or start Part 2.
+Part 1 (Heavy Core Implementation) is COMPLETE. Tasks 1–10 are fully verified.
 
 - Task 1: specialist contracts implemented; 14 tests observed RED then GREEN.
 - Task 2: fresh factories implemented; 3 additional tests observed RED then GREEN (17 total passed).
@@ -13,8 +13,10 @@ Implementation is IN PROGRESS. Do not mark Part 1 complete or start Part 2.
 - Task 4: implemented server discovery/invocation matrix across all eight scopes, malformed-argument rejection, expiry/origin/revocation and no-router-capability checks. Added cancellation/capacity and cached session/deadline tests for both specialist scopes.
 - Task 5: harness primitives implemented in `agent_harness.py`: ContextVar parent/stage binding, 60/85-second deadlines, shared stage/parent attempt and generation reservations, context estimates/history trimming and three-read counter. Added validated context settings. Provider hooks added to OpenAI/Ollama and Gemini. Production request binding, admission consolidation and tool counter binding remain for Task 7.
 - Task 6: provider accounting and allowlisted numeric stage trace export implemented; Gemini reasoning included, missing usage conservatively reserves full allowance, cancellation accounted. Stage timing recorded. Run-record persistence, complete failure-code mapping and router/specialist publication remain for Tasks 7–8.
-- Task 7 COMPLETE: All explicit specialist API execution (`chat`, `portfolio_chat`, `portfolio_risk_chat`, `explain_report`) migrated to registered fresh specialist factories in `AGENT_REGISTRY` / `specialist_agents.py`. Implemented authenticated `POST /api/options-agent/portfolio/risk/chat`. Bound cumulative `RequestHarness` and unified tool-read charging via `connection(..., harness=harness)`. Enforced strict history isolation and HTTP 409 `conversation_scope_changed` on topic/scope/contract/context changes and legacy mixed conversations before evidence acquisition. Removed `external_tools` from specialist runs. Runtime tests (`test_portfolio_agent.py`, `test_options_agent.py`, `test_options_report_chat.py`, `test_options_harness.py`, `test_portfolio_risk_integration.py`) migrated off `build_agent`. `build_agent` retained solely for `options_evals.py` until Task 9. Full Task 7 verification (110 passed) and H1-H3 regression (49 passed) clean.
-- Tasks 8–10 pending: master router, evaluation migration, final handoff.
+- Task 7 COMPLETE: All explicit specialist API execution (`chat`, `portfolio_chat`, `portfolio_risk_chat`, `explain_report`) migrated to registered fresh specialist factories in `AGENT_REGISTRY` / `specialist_agents.py`. Implemented authenticated `POST /api/options-agent/portfolio/risk/chat`. Bound cumulative `RequestHarness` and unified tool-read charging via `connection(..., harness=harness)`. Enforced strict history isolation and HTTP 409 `conversation_scope_changed` on topic/scope/contract/context changes and legacy mixed conversations before evidence acquisition. Removed `external_tools` from specialist runs. Runtime tests migrated off `build_agent`.
+- Task 8 COMPLETE: Implemented tool-less Agno Team `master_router` in `unified_chat.py`. Sub-agents classify `chain`, `portfolio`, `risk`, and `clarify`. Sticky follow-up routing, 409 `conversation_scope_changed` handling, and parent run record persistence across all success/failure paths verified.
+- Task 9 COMPLETE: Retired `options_monitor` and `build_agent`. Added offline specialist evaluation replay suite in `specialist_evals.py` with 18 synthetic cases across development and held_out splits, routing accuracy scoring, call metrics, and strict model opt-in guard. All 18 offline eval cases passed.
+- Task 10 COMPLETE: Generated five sanitized frozen JSON fixtures programmatically from tested FastAPI `TestClient` responses under `backend/evals/fixtures/specialist_api/{chain,portfolio,risk,clarify,scope_change}.json`. Added envelope schema, contract, cross-scope isolation, and secret sentinel scan tests in `test_specialist_evals.py` (9 passed). Authored comprehensive `SPECIALIST_AGENTS_HANDOFF.md` for Part 2 consumers. Part 1 verification complete. Ready for Part 2 Basic Integration.
 
 ## User override and decisions
 
