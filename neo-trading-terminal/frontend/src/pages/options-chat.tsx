@@ -151,10 +151,27 @@ function hasRiskReportShape(report: unknown): boolean {
     isRecord(report.coverage) &&
     Array.isArray(report.findings) &&
     report.findings.every(
-      f => isRecord(f) && Array.isArray(f.affected_row_ids) && Array.isArray(f.reason_codes)
+      f =>
+        isRecord(f) &&
+        typeof f.code === 'string' &&
+        typeof f.outcome === 'string' &&
+        isStringArray(f.affected_row_ids) &&
+        isStringArray(f.reason_codes)
     ) &&
     isRecord(report.observation_times) &&
     isStringArray(report.limitations)
+  )
+}
+
+function hasChainSnapshotShape(snapshot: unknown): snapshot is Snapshot {
+  return (
+    isRecord(snapshot) &&
+    Array.isArray(snapshot.rows) &&
+    typeof snapshot.underlying === 'string' &&
+    typeof snapshot.expiry === 'string' &&
+    typeof snapshot.retrieved_at === 'string' &&
+    isRecord(snapshot.summary) &&
+    isStringArray(snapshot.limitations)
   )
 }
 
@@ -187,7 +204,17 @@ function validateReply(
     if (currentMode !== 'auto' || raw.agent_id !== EXPECTED_AGENT_ID.clarify) {
       throw new Error('Unexpected clarification response from server.')
     }
-    if ('snapshot' in raw || 'portfolio_snapshot' in raw || 'risk_snapshot' in raw) {
+    if (
+      'snapshot' in raw ||
+      'portfolio_snapshot' in raw ||
+      'risk_snapshot' in raw ||
+      'evidence_ids' in raw ||
+      'snapshot_ids' in raw ||
+      'risk_report_ids' in raw ||
+      'report_ids' in raw ||
+      'report' in raw ||
+      'risk_report' in raw
+    ) {
       throw new Error('Clarification response must not include specialist evidence.')
     }
     const rawCid = raw.conversation_id
@@ -222,15 +249,7 @@ function validateReply(
 
   if (targetScope === 'chain') {
     const snap = raw.snapshot
-    if (
-      !isRecord(snap) ||
-      !Array.isArray(snap.rows) ||
-      typeof snap.underlying !== 'string' ||
-      typeof snap.expiry !== 'string' ||
-      typeof snap.retrieved_at !== 'string' ||
-      !isRecord(snap.summary) ||
-      !isStringArray(snap.limitations)
-    ) {
+    if (!hasChainSnapshotShape(snap)) {
       throw new Error('Options chain response is missing required snapshot evidence.')
     }
     return {
@@ -402,6 +421,9 @@ export default function OptionsChat() {
       } else {
         const result = await api<Snapshot>('/options-agent/snapshot', 'POST', context)
         if (canPublish(version, revision.current, mounted.current)) {
+          if (!hasChainSnapshotShape(result)) {
+            throw new Error('Options chain snapshot evidence is incomplete.')
+          }
           setSnapshot(result)
           setSnapshotError('')
           setNow(Date.now())

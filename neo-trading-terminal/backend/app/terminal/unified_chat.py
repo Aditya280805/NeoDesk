@@ -361,7 +361,12 @@ async def dispatch_unified(service, user_id, body):
         persist_parent('cancelled', 'cancelled')
         raise
     except HTTPException as error:
-        reason = 'specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed'
+        detail = error.detail if isinstance(error.detail, dict) else {}
+        reason = (
+            'conversation_scope_changed'
+            if error.status_code == 409 and detail.get('code') == 'conversation_scope_changed'
+            else ('specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed')
+        )
         persist_parent('failed', reason)
         error.headers = {**(error.headers or {}), 'X-Options-Run-Id': parent_run_id}
         raise

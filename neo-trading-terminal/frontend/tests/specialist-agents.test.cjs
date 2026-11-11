@@ -902,6 +902,16 @@ test('Auto follow-up clarify retains active conversation_id and rejects spurious
 test('validateReply rejects mismatched agent_id, non-read-only replies, blank answers, mid-conversation scope flips, and partial/leaky evidence', async () => {
   const cases = [
     {
+      name: 'clarify response leaking specialist evidence references',
+      mode: 'auto',
+      payload: {
+        ...clarifyFixture.response,
+        evidence_ids: [portfolioFixture.response.portfolio_snapshot.evidence_id],
+        risk_report: riskFixture.response.risk_snapshot.risk_report,
+      },
+      expectedMessage: 'Clarification response must not include specialist evidence.',
+    },
+    {
       name: 'wrong agent_id in explicit chain mode',
       mode: 'chain',
       payload: { ...chainFixture.response, agent_id: 'portfolio_analysis' },
@@ -970,6 +980,23 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
         risk_snapshot: {
           evidence_id: riskFixture.response.risk_snapshot.evidence_id,
           risk_report: { report_id: 'r-partial', evaluated_at: '2026-11-11T10:34:12Z', summary: 'pass' },
+        },
+      },
+      expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
+    },
+    {
+      name: 'risk_snapshot finding has invalid code and outcome types',
+      mode: 'risk',
+      payload: {
+        ...riskFixture.response,
+        risk_snapshot: {
+          ...riskFixture.response.risk_snapshot,
+          risk_report: {
+            ...riskFixture.response.risk_snapshot.risk_report,
+            findings: riskFixture.response.risk_snapshot.risk_report.findings.map((finding, index) =>
+              index === 0 ? { ...finding, code: 123, outcome: null } : finding
+            ),
+          },
         },
       },
       expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
@@ -1305,6 +1332,18 @@ test('snapshotError renders exact ApiError and refresh validation messages in a 
     assert.notEqual(snapAlert.type, 'p')
     assert.equal(treeNodes(snapAlert).some(n => n.type === 'p'), false)
     assert.equal(textOf(snapAlert), 'Portfolio risk snapshot is missing risk report evidence.')
+
+    // Incomplete chain refresh payload must be rejected before it reaches the renderer.
+    findScopeSelect(tree).props.onChange({ target: { value: 'chain' } })
+    tree = h.render()
+    h.queue({ status: 200, data: { rows: [], underlying: 'NIFTY' } })
+    await findButton(tree, 'Refresh snapshot').props.onClick()
+    await settle()
+
+    tree = h.render()
+    snapAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(snapAlert)
+    assert.equal(textOf(snapAlert), 'Options chain snapshot evidence is incomplete.')
   } finally {
     h.unmount()
   }

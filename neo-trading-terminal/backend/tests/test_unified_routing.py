@@ -278,3 +278,45 @@ def test_dispatch_unified_history_returns_none_fails_closed_404():
     assert 'Conversation not found' in str(excinfo.value.detail)
     service.chat.assert_not_awaited()
     service.portfolio_chat.assert_not_awaited()
+
+
+def test_market_context_conflict_is_classified_in_parent_trace(monkeypatch):
+    from uuid import uuid4
+    from app.terminal.unified_chat import UnifiedChatRequest, dispatch_unified
+
+    conversation_id = uuid4()
+    records = []
+    service = SimpleNamespace(
+        config=SimpleNamespace(agent_input_token_estimate_limit=24000, agent_context_token_limit=32768),
+        history=Mock(return_value={
+            'context': {
+                'agent_id': 'options_trading_analysis',
+                'scope': 'chain',
+                'underlying': 'NIFTY',
+                'exchange': 'nse_fo',
+                'expiry': None,
+            },
+            'turns': [{'message': 'Show the chain'}],
+        }),
+        status=Mock(return_value={'model_configured': True, 'enabled': True}),
+        chat=AsyncMock(side_effect=HTTPException(409, {
+            'code': 'conversation_scope_changed',
+            'message': 'Start a new conversation after changing scope, specialist, or market selection.',
+        })),
+        portfolio_chat=AsyncMock(),
+        portfolio_risk_chat=AsyncMock(),
+        record_run=lambda *args: records.append(args),
+    )
+    monkeypatch.setattr('app.terminal.unified_chat.route_question', AsyncMock(return_value='chain'))
+
+    request = UnifiedChatRequest(
+        message='Now show BANKNIFTY',
+        conversation_id=conversation_id,
+        context={'underlying': 'BANKNIFTY', 'exchange': 'nse_fo'},
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(dispatch_unified(service, 42, request))
+
+    assert excinfo.value.status_code == 409
+    assert records[-1][3] == 'failed'
+    assert records[-1][5]['failure_reason'] == 'conversation_scope_changed'
