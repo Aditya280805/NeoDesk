@@ -14,7 +14,7 @@ This document serves as the official specification and verification record deliv
 > 1. Presence of this handoff: `docs/superpowers/plans/SPECIALIST_AGENTS_HANDOFF.md`
 > 2. Presence of all 5 frozen fixtures: `backend/evals/fixtures/specialist_api/{chain,portfolio,risk,clarify,scope_change}.json`
 > 3. Total absence of `options_monitor` and `build_agent` in active runtime/evaluation code.
-> 4. Clean git status on `codex/local-specialist-agents`.
+> 4. Clean git status on `codex/local-specialist-agents` with `HEAD` at or after commit `c20aaf5`.
 
 ### Required Pre-flight Verification Commands
 
@@ -42,7 +42,10 @@ All heavy core architecture, isolated specialist agents, MCP tool projections, r
 4. `428f1d8` fix(options-agent): persist parent run across all failure branches and test citation guard (Task 8 fix)
 5. `96d238a` feat(evals): add offline specialist evaluation suite and retire options_monitor (Task 9)
 6. `cb8471a` fix(evals): implement live-model execution, routing accuracy, and call metrics (Task 9 fix)
-7. HEAD feat(evals): generate frozen specialist API fixtures and Part 2 handoff (Task 10)
+7. `53df1cd` feat(evals): generate frozen specialist API fixtures and Part 2 handoff (Task 10)
+8. `c20aaf5` fix(unified-chat): fail closed with 404 when history is None and clean specialist evals (Code fix review)
+
+Part 2 must start from branch `codex/local-specialist-agents` at `HEAD` (at or after `c20aaf5`).
 
 ---
 
