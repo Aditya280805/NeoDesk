@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pydantic import SecretStr
 
 from agno.models.openai import OpenAIChat
+from app.terminal.agent_harness import bounded_invoke
 
 options_run = ContextVar('options_run', default=False)
 
@@ -38,6 +39,8 @@ class ProviderSettings:
 
     @property
     def configured(self):
+        if self.provider == 'ollama':
+            return not self.error
         return bool(self.key and self.key.get_secret_value().strip() and not self.error)
 
     @property
@@ -47,6 +50,10 @@ class ProviderSettings:
 
 def provider_settings(config):
     provider = config.options_agent_provider
+    if provider == 'ollama':
+        model = config.options_agent_model or 'qwen3:4b'
+        error = 'Cloud model tags are disabled for local inference.' if 'cloud' in model.lower() else None
+        return ProviderSettings('ollama', model, '', None, error)
     if provider == 'auto':
         if config.gemini_api_key and config.gemini_api_key.get_secret_value().strip():
             provider = 'gemini'
@@ -68,6 +75,10 @@ def build_model(config):
     settings = provider_settings(config)
     if not settings.configured:
         raise ValueError(settings.error or f'Set {settings.key_name} on the server.')
+    if settings.provider == 'ollama':
+        return BoundedOllamaChat(id=settings.model, api_key='ollama',
+            base_url='http://127.0.0.1:11434/v1', max_tokens=900,
+            timeout=30, max_retries=0)
     backup = config.gemini_backup_api_key if settings.provider == 'gemini' else config.openai_backup_api_key
     rotator = KeyRotator(settings.key, backup)
     if settings.provider == 'gemini':
@@ -90,7 +101,7 @@ def provider_failure(config, error):
     from agno.exceptions import ModelProviderError
     provider = provider_settings(config)
     code = error.status_code if isinstance(error, ModelProviderError) else None
-    name = 'Gemini' if provider.provider == 'gemini' else 'OpenAI'
+    name = {'gemini': 'Gemini', 'ollama': 'Ollama'}.get(provider.provider, 'OpenAI')
     if code == 429:
         return 'provider_quota', f'{name} quota or rate limit reached. Check your API project limits and retry later.'
     if code == 401:
@@ -131,7 +142,7 @@ class BoundedOpenAIChat(OpenAIChat):
         self.requests_remaining -= 1
         self.max_completion_tokens = self.completion_remaining
         try:
-            response = await super().ainvoke(*args, **kwargs)
+            response = await bounded_invoke(super().ainvoke, self.completion_remaining, *args, **kwargs)
         except Exception as error:
             backup = self.key_rotator.next_key(error) if self.key_rotator else None
             if not backup or self.requests_remaining <= 0:
@@ -141,7 +152,7 @@ class BoundedOpenAIChat(OpenAIChat):
                 self.async_client = None
             self.api_key = backup.get_secret_value()
             self.requests_remaining -= 1
-            response = await super().ainvoke(*args, **kwargs)
+            response = await bounded_invoke(super().ainvoke, self.completion_remaining, *args, **kwargs)
         usage = response.response_usage
         # Missing usage: reserve the entire requested budget, never assume free.
         spent = getattr(usage, 'output_tokens', None)
@@ -151,3 +162,14 @@ class BoundedOpenAIChat(OpenAIChat):
         if self.completion_remaining < 0:
             raise ValueError('Options model exceeded completion budget')
         return response
+
+
+@dataclass
+class BoundedOllamaChat(BoundedOpenAIChat):
+    """Ollama's local OpenAI-compatible endpoint uses max_tokens."""
+
+    def get_request_params(self, *args, **kwargs):
+        params = super().get_request_params(*args, **kwargs)
+        params.pop('max_completion_tokens', None)
+        params['max_tokens'] = self.completion_remaining
+        return params

@@ -11,6 +11,14 @@ session and cannot claim fresh market evidence. Each capability
 may discover and invoke only its authorized scope. Do not add execution tools or external MCP
 clients without a separate specification.
 
+Specialist capabilities `portfolio_analysis` and `risk` authorize only
+`get_portfolio_analysis_snapshot` and `get_portfolio_risk_report`, respectively.
+Analysis receives no risk report or risk-only inputs; risk receives only the
+evidence ID and deterministic risk report, never account sections. The complete
+portfolio envelope remains private request state. The master/router receives no
+capability. Legacy `portfolio` remains for existing snapshot consumers during
+the runtime migration and must not be assigned to a specialist factory.
+
 - Snapshot normalization and arithmetic belong in `options_snapshot.py`, never
   in prompts. Missing data stays unavailable. Reject contradictory metadata.
 - MCP capabilities are internal secrets. Never put them in browser responses,
