@@ -40,6 +40,9 @@ class RoutingDecision(Contract):
 
 class ProposalLeg(Contract):
     contract_id: str = Field(min_length=1, max_length=100)
+    underlying_key: str = Field(min_length=1,max_length=100)
+    exchange: Literal['nse_fo','bse_fo']
+    currency: Literal['INR']
     expiry: date
     side: Literal['BUY', 'SELL']
     quantity: int = Field(strict=True, gt=0, le=1000000)
@@ -58,9 +61,23 @@ class StrategyProposal(Contract):
     schema_version: Literal['strategy-proposal.v1'] = 'strategy-proposal.v1'
     proposal_id: UUID = Field(default_factory=uuid4)
     evidence_id: UUID
-    template: Literal['bull_call_spread', 'bear_put_spread', 'iron_condor', 'covered_call']
+    template: Literal['bull_call_spread', 'bear_put_spread']
     valued_at: AwareDatetime
     legs: tuple[ProposalLeg, ...] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode='after')
+    def supported_structure(self):
+        if len(self.legs)!=2:
+            raise ValueError('Debit spread requires two legs')
+        buy,sell = self.legs
+        if (buy.underlying_key,buy.exchange,buy.currency)!=(sell.underlying_key,sell.exchange,sell.currency):
+            raise ValueError('Spread legs must share a canonical underlying, exchange and currency')
+        expected_type = 'CALL' if self.template=='bull_call_spread' else 'PUT'
+        if (buy.side,sell.side)!=('BUY','SELL') or buy.contract_id==sell.contract_id or buy.expiry!=sell.expiry or buy.quantity!=sell.quantity or buy.lot_size!=sell.lot_size or buy.option_type!=expected_type or sell.option_type!=expected_type:
+            raise ValueError('Invalid verified debit spread structure')
+        if self.template=='bull_call_spread' and buy.strike>=sell.strike or self.template=='bear_put_spread' and buy.strike<=sell.strike:
+            raise ValueError('Invalid debit spread strike ordering')
+        return self
 
 
 class AnalyticsEvidence(Contract):

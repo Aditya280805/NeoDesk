@@ -2,6 +2,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from contextlib import contextmanager
 
 
 class AnalyticsStore:
@@ -22,8 +23,14 @@ class AnalyticsStore:
                 revision INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL);
             ''')
 
+    @contextmanager
     def connect(self):
-        return sqlite3.connect(self.path,timeout=10)
+        db = sqlite3.connect(self.path,timeout=10)
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def capture(self, user_id, evidence_id, captured_at, payload):
         if not isinstance(user_id,int) or isinstance(user_id,bool) or user_id <= 0:

@@ -164,6 +164,16 @@ class OptionsMCP:
                                  capability.session_generation,deadline_monotonic=capability.deadline_monotonic)
             return AnalyticsEvidence.model_validate_json(capability.analytics_json[name]).model_dump(mode='json')
 
+    async def _validate_analytics_discovery(self, capability):
+        if capability.analytics_budget is None:
+            return
+        remaining = min(10,capability.expires-time.monotonic(),capability.deadline_monotonic-time.monotonic(),capability.analytics_budget.deadline-time.monotonic())
+        if remaining<=0 or not capability.session_generation or self.portfolio_service is None:
+            raise ValueError('Analytics session unavailable')
+        async with asyncio.timeout(remaining):
+            await self._work(capability,self.portfolio_service.assert_generation,capability.user_id,
+                capability.session_generation,deadline_monotonic=capability.deadline_monotonic)
+
     async def _read(self, capability):
         async with capability.lock:
             if capability.expires <= time.monotonic():
@@ -262,6 +272,10 @@ class OptionsMCP:
             class ScopeMiddleware(MCPMiddleware):
                 async def on_list_tools(self, context, call_next):
                     capability = get_http_request().scope['options_capability']
+                    try:
+                        await self_runtime._validate_analytics_discovery(capability)
+                    except Exception:
+                        raise ToolError('Analytics session unavailable.') from None
                     return [tool for tool in await call_next(context) if tool.name in capability.allowed_tools]
 
                 async def on_call_tool(self, context, call_next):
@@ -270,6 +284,7 @@ class OptionsMCP:
                         raise ToolError('Tool unavailable for this request.')
                     return await call_next(context)
 
+            self_runtime = self
             mcp = FastMCP('NeoDesk Options', version=TOOL_VERSION,
                           mask_error_details=True, strict_input_validation=True)
             mcp.add_middleware(ScopeMiddleware())

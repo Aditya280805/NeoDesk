@@ -11,3 +11,8 @@
 - Context7 FastMCP 4.1.3 documents on_list_tools/on_call_tool filtering. Retain existing HTTP request middleware and apply explicit role allowlists; do not rely on component visibility alone.
 - Fee output remains ESTIMATE until exchange/broker rates and contract-note rounding/aggregation are captured; unknown fee components keep total unavailable.
 - Historical-tail kernel accepts validated losses, not raw price histories. Scenario generation and per-series/horizon coverage remain separate work.
+- Historical full repricing now uses ordered consecutive source-declared sessions, actual calendar elapsed time and spot/contract-IV relative changes. Portfolio scenarios intersect valid dates across positions; series/horizon tails remain independently available.
+- Candidate v1 supports verified bull-call/bear-put debit spreads only; no arbitrary or mixed-underlying leg combination. Additional template types require explicit validation before exposure.
+- Context7 /ta-lib/ta-lib-python: function signatures and bundled wheels confirmed. Native TA-Lib 0.6.8 installed, EMA/bandwidth parity checked against NumPy subset.
+- Context7 /pyportfolio/pyportfolioopt + installed signature: HRPOpt accepts returns/cov_matrix, not prices. Convert aligned adjusted prices with pct_change(fill_method=None); reject missing/invalid data and exclude noneligible assets.
+- Verified dependency compatibility: PyPortfolioOpt 1.5.6 + SciPy 1.16.3. SciPy 1.18.1 removes the library's required private hierarchy API; PyPortfolioOpt 1.6.0 still uses it. Pin 1.16.3 rather than monkeypatching third-party globals. Actual HRP optimization and all 50 focused analytics/MCP cases pass on this set.
