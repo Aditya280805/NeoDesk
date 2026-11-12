@@ -9,6 +9,7 @@ from .analytics_capture import CapturedAnalytics
 from .analytics_contracts import AnalyticsEvidence, RoutingDecision
 from .analytics_runtime import TOOLS_BY_ROLE, TurnBudget
 from .analytics_stage import run_specialist_stage
+from .analytics_handoff import resolve_selection, project_proposal
 from .agent_harness import RequestHarness, harness_context
 from .options_model import build_model, close_agent_model, options_run
 
@@ -160,6 +161,16 @@ class AnalyticsCoordinator:
             if time.monotonic() >= budget.deadline-1:
                 remaining.extend(state['pending'][index:])
                 break
+            if state.get('selected_proposal') is not None and task['role'] != 'options_trading_analysis' and task['role'] not in state.get('proposal_projected_roles',[]):
+                from .analytics_contracts import StrategyProposal
+                projected, items = project_proposal(captured,StrategyProposal.model_validate(state['selected_proposal']),task['role'])
+                def publish():
+                    self.capture.store.capture_batch(user,items,
+                        validate=lambda:self._eligible(user,binding,projected,budget.deadline),deadline=budget.deadline)
+                await self._work(user,budget,publish)
+                captured = projected
+                state['captured']['evidence_json'] = list(captured.evidence_json)
+                state.setdefault('proposal_projected_roles',[]).append(task['role'])
             try:
                 # Reserve publication time without resetting shared call counters.
                 stage_budget = TurnBudget(deadline=budget.deadline-0.5, calls=budget.calls)
@@ -168,6 +179,12 @@ class AnalyticsCoordinator:
             except TimeoutError:
                 remaining.extend(state['pending'][index:])
                 break
+            proposal = resolve_selection(captured,result)
+            if proposal is not None:
+                encoded = proposal.model_dump(mode='json')
+                if state.get('selected_proposal') is not None and state['selected_proposal'] != encoded:
+                    raise ValueError('Proposal changed within a captured run')
+                state['selected_proposal'] = encoded
             state['stages'].append(result)
             if result['pending_tools']:
                 remaining.append(dict(role=task['role'], tools=result['pending_tools']))
@@ -178,4 +195,5 @@ class AnalyticsCoordinator:
         await self._work(user, budget, self._eligible, user, binding, captured, budget.deadline)
         return dict(scope='analytics', status='partial' if remaining else 'completed', stages=state['stages'],
                     answer='\n\n'.join(stage['interpretation'] for stage in state['stages']),
-                    pending=[dict(role=t['role'], tools=list(t['tools'])) for t in remaining], read_only=True)
+                    pending=[dict(role=t['role'], tools=list(t['tools'])) for t in remaining], read_only=True,
+                    selected_proposal=state.get('selected_proposal'))

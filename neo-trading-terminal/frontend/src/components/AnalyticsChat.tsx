@@ -10,6 +10,7 @@ type Stage = {
 type Result = {
   scope: 'analytics'; status: string; answer: string; stages: Stage[]
   continuation_id: string | null; continuations_exhausted?: boolean
+  selected_proposal?: { proposal_id: string; template: string; legs: { side: string; contract_id: string; quantity: number }[] } | null
   pending?: { role: string; tools: string[] }[]
 }
 
@@ -78,6 +79,12 @@ export default function AnalyticsChat({ context }: { context: Context }) {
     {error && <p role="alert">{error}</p>}
     {result && <div aria-live="polite">
       <p>Status: {result.status}</p>
+      {result.selected_proposal && <article aria-label="Selected hypothetical proposal">
+        <h3>Selected hypothetical proposal</h3>
+        <p>{result.selected_proposal.template.replaceAll('_', ' ')} · {result.selected_proposal.proposal_id}</p>
+        <ul>{result.selected_proposal.legs.map(leg => <li key={leg.contract_id}>{leg.side} {leg.quantity} · {leg.contract_id}</li>)}</ul>
+        <p>Post-proposal costs and combined-account risk require captured supporting inputs. Read the downstream coverage before assessing this proposal.</p>
+      </article>}
       {result.stages.map((stage, index) => <article key={`${stage.role}-${index}`}>
         <h3>{stage.role.replaceAll('_', ' ')}</h3>
         <p>{stage.interpretation}</p>
