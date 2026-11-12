@@ -29,7 +29,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --only-binary=:all: -r requirements.txt -c requirements.lock
       - run: python -m pip check
-      - run: python -m pytest tests/test_analytics_v2.py tests/test_analytics_capture.py tests/test_analytics_route.py tests/test_analytics_stage.py tests/test_analytics_coordinator.py -q -p no:cacheprovider
+      - run: python -m pytest tests/test_analytics_v2.py tests/test_analytics_capture.py tests/test_analytics_route.py tests/test_analytics_stage.py tests/test_analytics_coordinator.py tests/test_analytics_inputs.py -q -p no:cacheprovider
   frontend:
     runs-on: ubuntu-latest
     defaults:

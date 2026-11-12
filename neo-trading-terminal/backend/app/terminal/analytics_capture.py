@@ -40,7 +40,7 @@ class AnalyticsCaptureService:
         self.market,self.store,self.snapshots,self.portfolio = market,store,snapshots,portfolio_service
         self.work = work if work is not None else BoundedWork()
 
-    async def capture(self,user_id,context,requested_tools,*,budget):
+    async def capture(self,user_id,context,requested_tools,*,budget,historical_input=None):
         names = tuple(dict.fromkeys(requested_tools))
         known = set().union(*TOOLS_BY_ROLE.values())
         if type(user_id) is not int or user_id<=0 or not isinstance(context,OptionsContext) or not isinstance(budget,TurnBudget) or not names or not set(names)<=known:
@@ -50,9 +50,14 @@ class AnalyticsCaptureService:
         if deadline<=time.monotonic():
             raise ValueError('Turn deadline exhausted')
         copied = context.model_copy(deep=True)
+        if historical_input is not None:
+            from .analytics_inputs import HistoricalAnalyticsInput
+            historical_input = HistoricalAnalyticsInput.model_validate(historical_input)
+            if historical_input.context != copied:
+                raise ValueError('Imported input market context differs')
         cancelled = Event()
         try:
-            return await self.work.run(user_id,lambda:asyncio.to_thread(self._collect,user_id,copied,names,deadline,cancelled),
+            return await self.work.run(user_id,lambda:asyncio.to_thread(self._collect,user_id,copied,names,deadline,cancelled,historical_input),
                                        timeout=deadline-time.monotonic())
         except BaseException:
             cancelled.set()
@@ -65,7 +70,7 @@ class AnalyticsCaptureService:
             raise ValueError('Authenticated broker session required')
         self.portfolio.assert_generation(user_id,generation,deadline_monotonic=deadline)
 
-    def _collect(self,user_id,context,names,deadline,cancelled):
+    def _collect(self,user_id,context,names,deadline,cancelled,historical_input=None):
         def check(generation):
             if cancelled.is_set():
                 raise TimeoutError('Analytics capture cancelled')
@@ -78,6 +83,13 @@ class AnalyticsCaptureService:
         check(generation)
         inputs,refs,source_failure = {},[],None
         observed_at,coverage,limitations = None,{},[]
+        imported = None
+        if historical_input is not None:
+            from .analytics_inputs import AnalyticsInputStore
+            records = AnalyticsInputStore(self.store)
+            saved = records.save(user_id,historical_input)
+            inputs, reference, imported = records.load(user_id,saved['dataset_id'],context)
+            refs.append(reference)
         if set(names)&TOOLS_BY_ROLE['options_trading_analysis']:
             try:
                 chain = self.snapshots.fetch(user_id,context)
@@ -104,10 +116,15 @@ class AnalyticsCaptureService:
         for name in names:
             check(generation)
             item = calculate_evidence(name,inputs,source_refs=tuple(refs),observed_at=observed_at)
+            if imported is not None and name in ('get_technical_regime_snapshot','get_portfolio_attribution_and_rebalance'):
+                item = item.model_copy(update={'observed_at':imported.observed_at,
+                    'status':'PARTIAL' if item.status=='AVAILABLE' else item.status,
+                    'coverage':{'input_provenance':'user_declared_unverified'},
+                    'limitations':(*item.limitations,'Historical inputs and cash-flow adjustments are declared by the importing user, not independently verified.')})
             if source_failure:
                 item = item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'broker_source':source_failure}})
             identity_unknown = coverage and not all(coverage['market_identity'].values())
-            item = item.model_copy(update={'coverage':coverage,'limitations':tuple(dict.fromkeys((*item.limitations,*limitations))),
+            item = item.model_copy(update={'coverage':{**item.coverage,**coverage},'limitations':tuple(dict.fromkeys((*item.limitations,*limitations))),
                 'status':'PARTIAL' if identity_unknown and item.status=='AVAILABLE' else item.status,
                 'unavailable_reasons':{**item.unavailable_reasons,**({'market_identity':'provider_identity_unverified'} if identity_unknown else {})}})
             result[name] = item

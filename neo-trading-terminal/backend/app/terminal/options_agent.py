@@ -185,7 +185,7 @@ class OptionsAgent:
         self.routing_limiter.enter(user_id)
         try:
             captured = await self.analytics_capture.capture(user_id,body.context,
-                body.tools or sorted(TOOLS_BY_ROLE[body.role]),budget=TurnBudget())
+                body.tools or sorted(TOOLS_BY_ROLE[body.role]),budget=TurnBudget(),historical_input=body.historical_input)
             if captured.owner_id!=user_id:
                 raise ValueError('Evidence owner mismatch')
             return {'schema_version':'analytics-snapshot.v1','role':body.role,'read_only':True,
