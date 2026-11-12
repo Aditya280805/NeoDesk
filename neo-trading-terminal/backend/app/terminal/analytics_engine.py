@@ -11,7 +11,7 @@ from .analytics_runtime import TOOLS_BY_ROLE
 from .quant_technical import technical_regime
 from .quant_surface import volatility_surface
 from .quant_microstructure import oi_microstructure, gamma_exposure_proxy
-from .quant_attribution import portfolio_attribution
+from .quant_attribution import portfolio_attribution, declared_attribution
 from .quant_compliance import compliance_checks
 from .quant_risk import stress_matrix, historical_repricing
 from .quant_proposals import spread_payoff
@@ -35,6 +35,8 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
     if any(candidate.evidence_id!=identity for candidate in candidates):
         raise ValueError('Candidates must be bound to the captured tool evidence identity')
     missing = [key for key in REQUIRED[name] if inputs.get(key) is None]
+    if name=='get_portfolio_attribution_and_rebalance' and inputs.get('declared_attribution') is not None:
+        missing = [key for key in missing if key!='verified_returns']
     if not source_refs:
         missing.append('verified_source_reference')
     metrics, reasons, limitations = {},{},[]
@@ -59,8 +61,16 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
     elif name == 'compute_indian_statutory_costs_and_payoff':
         metrics = spread_payoff(inputs['selected_proposal'],inputs['quotes'],roundtrip_cost_paise=inputs.get('roundtrip_cost_paise'))
     elif name == 'get_portfolio_attribution_and_rebalance':
-        metrics = portfolio_attribution(inputs['verified_returns'],benchmark=inputs.get('benchmark_returns'),bank_benchmark=inputs.get('bank_returns'))
+        metrics = portfolio_attribution(inputs.get('verified_returns',[]),benchmark=inputs.get('benchmark_returns'),bank_benchmark=inputs.get('bank_returns'))
         metrics['hrp_weights'] = inputs.get('verified_hrp_weights')
+        if inputs.get('declared_attribution') is not None:
+            extra = declared_attribution(inputs['declared_attribution'])
+            updated_reasons = extra.pop('unavailable_reasons')
+            for key in ('win_rate','profit_factor'):
+                if extra.get(key) is not None:
+                    metrics['unavailable_reasons'].pop(key,None)
+            metrics['unavailable_reasons'].update(updated_reasons)
+            metrics.update(extra)
     elif name == 'check_sebi_and_mwpl_compliance':
         metrics = compliance_checks(inputs['risk_positions'],inputs['rules'])
     elif name == 'run_spot_vix_cvar_stress_matrix':
@@ -70,7 +80,9 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
     if metrics:
         limitations = metrics.pop('limitations',[])
         reasons.update(metrics.pop('unavailable_reasons',{}))
-        reasons.update({key:'required_history_input_or_assumption_unavailable' for key,value in metrics.items() if value is None})
+        for key,value in metrics.items():
+            if value is None:
+                reasons.setdefault(key,'required_history_input_or_assumption_unavailable')
     if observed_at is None:
         limitations.append('Source observation time is unknown; retrieval time does not verify market freshness.')
     option_tool = name in TOOLS_BY_ROLE['options_trading_analysis']

@@ -2,11 +2,11 @@
 import hashlib
 import math
 from datetime import date
-from typing import Literal
+from typing import Literal, Annotated
 from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator, StrictBool
 
 from .analytics_contracts import Contract
 from .options_snapshot import OptionsContext
@@ -66,6 +66,20 @@ class DeclaredSurfaceRow(Contract):
     lot_size: int = Field(strict=True,gt=0,le=100000)
 
 
+class DeclaredAssetHistory(Contract):
+    asset_id: str = Field(min_length=1,max_length=100)
+    kind: Literal['cash_equity','cash_etf','option','future']
+    sector: str | None = Field(default=None,min_length=1,max_length=100)
+    value_paise: int = Field(strict=True,ge=0,le=1000000000000000)
+    adjusted_prices: tuple[Annotated[float,Field(ge=1e-8,le=1e12,allow_inf_nan=False)],...] = Field(max_length=5000)
+
+
+class DeclaredClosedTrade(Contract):
+    trade_id: str = Field(min_length=1,max_length=100)
+    closed_at: AwareDatetime
+    net_pnl_paise: int = Field(strict=True,ge=-1000000000000000,le=1000000000000000)
+
+
 class HistoricalAnalyticsInput(Contract):
     schema_version: Literal['analytics-input.1'] = 'analytics-input.1'
     context: OptionsContext
@@ -85,11 +99,33 @@ class HistoricalAnalyticsInput(Contract):
     surface_rows: tuple[DeclaredSurfaceRow,...] = Field(default=(),max_length=500)
     surface_spot: float | None = Field(default=None,ge=1e-8,le=1e12,allow_inf_nan=False)
     gex_sign_assumption: Literal['calls_positive_puts_negative'] | None = None
+    asset_price_dates: tuple[AwareDatetime,...] = Field(default=(),max_length=5000)
+    cash_assets: tuple[DeclaredAssetHistory,...] = Field(default=(),max_length=100)
+    closed_trades: tuple[DeclaredClosedTrade,...] = Field(default=(),max_length=10000)
+    trade_history_complete: StrictBool = False
+    trade_period_start: AwareDatetime | None = None
+    trade_period_end: AwareDatetime | None = None
 
     @model_validator(mode='after')
     def aligned(self):
-        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows:
+        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades:
             raise ValueError('At least one historical series required')
+        if len({asset.asset_id for asset in self.cash_assets})!=len(self.cash_assets) or sum(len(asset.adjusted_prices) for asset in self.cash_assets)>100000:
+            raise ValueError('Unique bounded asset histories required')
+        if any(len(asset.adjusted_prices)!=len(self.asset_price_dates) for asset in self.cash_assets):
+            raise ValueError('Aligned asset price dates required')
+        price_days = [value.astimezone(ZoneInfo('Asia/Kolkata')).date() for value in self.asset_price_dates]
+        if len(price_days)!=len(set(price_days)) or any(a>=b for a,b in zip(self.asset_price_dates,self.asset_price_dates[1:])) or self.asset_price_dates and self.asset_price_dates[-1]>self.observed_at:
+            raise ValueError('Ordered daily asset history required')
+        if self.cash_assets and len(self.asset_price_dates)<30:
+            raise ValueError('At least thirty aligned adjusted prices required')
+        if len({trade.trade_id for trade in self.closed_trades})!=len(self.closed_trades):
+            raise ValueError('Unique closed trade IDs required')
+        if self.closed_trades or self.trade_history_complete:
+            if self.trade_period_start is None or self.trade_period_end is None or not self.trade_period_start<self.trade_period_end<=self.observed_at:
+                raise ValueError('Explicit closed-trade period required')
+            if any(not self.trade_period_start<=trade.closed_at<=self.trade_period_end for trade in self.closed_trades):
+                raise ValueError('Trade outside declared period')
         if len({row.contract_id for row in self.surface_rows})!=len(self.surface_rows):
             raise ValueError('Unique surface contract IDs required')
         pricing = {}
@@ -168,6 +204,12 @@ class AnalyticsInputStore:
         if value.context != context:
             raise ValueError('Input dataset market context differs')
         inputs = {}
+        if value.cash_assets or value.closed_trades:
+            inputs['declared_attribution'] = dict(assets=[asset.model_dump(mode='json') for asset in value.cash_assets],
+                dates=list(value.asset_price_dates),trades=[trade.model_dump(mode='json') for trade in value.closed_trades],
+                trade_history_complete=value.trade_history_complete,
+                trade_period_start=value.trade_period_start.isoformat() if value.trade_period_start else None,
+                trade_period_end=value.trade_period_end.isoformat() if value.trade_period_end else None)
         if value.surface_rows:
             inputs.update(surface_rows=[row.model_dump() for row in value.surface_rows],forward=value.surface_rows[0].forward,
                 rate=value.surface_rows[0].rate,as_of=value.observed_at,
