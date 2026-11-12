@@ -46,3 +46,24 @@ def statutory_charges(product, side, turnover_inr, trade_date, *, brokerage_inr=
     components = [result[k] for k in ('stt_paise','stamp_paise','brokerage_paise','exchange_paise','sebi_paise','gst_paise','slippage_paise')]
     result['total_paise'] = sum(components) if all(x is not None for x in components) else None
     return result
+
+
+def declared_fee_estimate(transactions):
+    """Aggregate explicit transaction scenarios; unknown charges never become zero."""
+    if not transactions or len(transactions)>200:
+        raise ValueError('Bounded fee transactions required')
+    results = []
+    for row in transactions:
+        charges = statutory_charges(row['product'],row['side'],row['turnover_inr'],row['trade_date'],
+            brokerage_inr=row.get('brokerage_inr') or 0,exchange_rate=row.get('exchange_rate'),
+            sebi_rate=row.get('sebi_rate'),slippage_inr=row.get('slippage_inr'))
+        if row.get('brokerage_inr') is None:
+            charges.update(brokerage_paise=None,gst_paise=None,total_paise=None)
+        results.append(dict(transaction_id=row['transaction_id'],product=row['product'],side=row['side'],
+            trade_date=row['trade_date'],turnover_inr=row['turnover_inr'],turnover_basis=row['turnover_basis'],
+            cost_source=row['cost_source'],charges=charges))
+    totals = [result['charges']['total_paise'] for result in results]
+    return dict(transactions=results,total_paise=sum(totals) if all(value is not None for value in totals) else None,
+        status='ESTIMATE',aggregation='sum_of_per_transaction_component_paise_estimates',
+        stt_source='https://www.nseindia.in/static/products-services/equity-derivatives-securities-transaction-tax',
+        limitations=['Broker/exchange/SEBI/slippage inputs are declared assumptions. Contract-note aggregation is unverified. A fee batch is not automatically bound to a strategy payoff.'])

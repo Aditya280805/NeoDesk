@@ -116,7 +116,7 @@ class AnalyticsCaptureService:
         for name in names:
             check(generation)
             item = calculate_evidence(name,inputs,source_refs=tuple(refs),observed_at=observed_at)
-            if imported is not None and name in ('get_technical_regime_snapshot','get_portfolio_attribution_and_rebalance','run_spot_vix_cvar_stress_matrix','get_vol_surface_and_greeks','get_nse_oi_microstructure'):
+            if imported is not None and name in ('get_technical_regime_snapshot','get_portfolio_attribution_and_rebalance','run_spot_vix_cvar_stress_matrix','get_vol_surface_and_greeks','get_nse_oi_microstructure','compute_indian_statutory_costs_and_payoff'):
                 item = item.model_copy(update={'observed_at':imported.observed_at,
                     'status':'PARTIAL' if item.status=='AVAILABLE' else item.status,
                     'coverage':{'input_provenance':'user_declared_unverified'},

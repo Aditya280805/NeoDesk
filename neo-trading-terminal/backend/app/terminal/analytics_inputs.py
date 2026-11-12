@@ -1,7 +1,7 @@
 """Bounded declared historical inputs; user imports never become live verification."""
 import hashlib
 import math
-from datetime import date
+from datetime import date, datetime, UTC
 from typing import Literal, Annotated
 from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
@@ -10,6 +10,7 @@ from pydantic import AwareDatetime, Field, model_validator, StrictBool
 
 from .analytics_contracts import Contract
 from .options_snapshot import OptionsContext
+from .options_history_contracts import Money
 
 
 class HistoricalBar(Contract):
@@ -80,6 +81,35 @@ class DeclaredClosedTrade(Contract):
     net_pnl_paise: int = Field(strict=True,ge=-1000000000000000,le=1000000000000000)
 
 
+class DeclaredFeeTransaction(Contract):
+    transaction_id: str = Field(min_length=1,max_length=100)
+    product: Literal['option','future','delivery','intraday']
+    side: Literal['BUY','SELL','EXERCISE']
+    trade_date: date
+    turnover_inr: Money
+    turnover_basis: Literal['option_premium','option_intrinsic','futures_notional','cash_trade_value']
+    cost_source: str = Field(min_length=1,max_length=1000)
+    brokerage_inr: Money | None = None
+    exchange_rate: Money | None = None
+    sebi_rate: Money | None = None
+    slippage_inr: Money | None = None
+
+    @model_validator(mode='after')
+    def applicable(self):
+        basis = 'option_intrinsic' if self.side=='EXERCISE' else 'option_premium' if self.product=='option' else 'futures_notional' if self.product=='future' else 'cash_trade_value'
+        if self.turnover_basis!=basis or self.side=='EXERCISE' and self.product!='option':
+            raise ValueError('Transaction turnover basis differs from applicable charge basis')
+        if self.trade_date<date(2024,10,1):
+            raise ValueError('No supported historical statutory schedule')
+        if any(value is not None and value>1 for value in (self.exchange_rate,self.sebi_rate)):
+            raise ValueError('Fee rates must be fractional')
+        if self.trade_date>datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date():
+            raise ValueError('Future statutory schedules are not established')
+        if any(value is not None and value>10000000000 for value in (self.turnover_inr,self.brokerage_inr,self.slippage_inr)):
+            raise ValueError('Fee estimate amount exceeds bounded exact-paise range')
+        return self
+
+
 class HistoricalAnalyticsInput(Contract):
     schema_version: Literal['analytics-input.1'] = 'analytics-input.1'
     context: OptionsContext
@@ -105,11 +135,14 @@ class HistoricalAnalyticsInput(Contract):
     trade_history_complete: StrictBool = False
     trade_period_start: AwareDatetime | None = None
     trade_period_end: AwareDatetime | None = None
+    fee_transactions: tuple[DeclaredFeeTransaction,...] = Field(default=(),max_length=200)
 
     @model_validator(mode='after')
     def aligned(self):
-        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades:
+        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades and not self.fee_transactions:
             raise ValueError('At least one historical series required')
+        if len({row.transaction_id for row in self.fee_transactions})!=len(self.fee_transactions) or any(row.trade_date>self.observed_at.astimezone(ZoneInfo('Asia/Kolkata')).date() for row in self.fee_transactions):
+            raise ValueError('Unique dated historical fee transactions required')
         if len({asset.asset_id for asset in self.cash_assets})!=len(self.cash_assets) or sum(len(asset.adjusted_prices) for asset in self.cash_assets)>100000:
             raise ValueError('Unique bounded asset histories required')
         if any(len(asset.adjusted_prices)!=len(self.asset_price_dates) for asset in self.cash_assets):
@@ -204,6 +237,8 @@ class AnalyticsInputStore:
         if value.context != context:
             raise ValueError('Input dataset market context differs')
         inputs = {}
+        if value.fee_transactions:
+            inputs['fee_transactions'] = [transaction.model_dump(mode='json') for transaction in value.fee_transactions]
         if value.cash_assets or value.closed_trades:
             inputs['declared_attribution'] = dict(assets=[asset.model_dump(mode='json') for asset in value.cash_assets],
                 dates=list(value.asset_price_dates),trades=[trade.model_dump(mode='json') for trade in value.closed_trades],

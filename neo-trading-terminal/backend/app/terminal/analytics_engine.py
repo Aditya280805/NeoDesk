@@ -15,6 +15,7 @@ from .quant_attribution import portfolio_attribution, declared_attribution
 from .quant_compliance import compliance_checks
 from .quant_risk import stress_matrix, historical_repricing
 from .quant_proposals import spread_payoff
+from .indian_charges import declared_fee_estimate
 
 REQUIRED = {
     'get_technical_regime_snapshot': ('bars',),
@@ -35,6 +36,8 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
     if any(candidate.evidence_id!=identity for candidate in candidates):
         raise ValueError('Candidates must be bound to the captured tool evidence identity')
     missing = [key for key in REQUIRED[name] if inputs.get(key) is None]
+    if name=='compute_indian_statutory_costs_and_payoff' and inputs.get('fee_transactions'):
+        missing = [key for key in missing if key not in ('selected_proposal','quotes')]
     if name=='get_portfolio_attribution_and_rebalance' and inputs.get('declared_attribution') is not None:
         missing = [key for key in missing if key!='verified_returns']
     if not source_refs:
@@ -59,7 +62,15 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
         # Supplied only by ParticipantReports parser/cache, never inferred from prices.
         metrics = dict(inputs['participant_report'])
     elif name == 'compute_indian_statutory_costs_and_payoff':
-        metrics = spread_payoff(inputs['selected_proposal'],inputs['quotes'],roundtrip_cost_paise=inputs.get('roundtrip_cost_paise'))
+        if inputs.get('selected_proposal') is not None and inputs.get('quotes') is not None:
+            metrics = spread_payoff(inputs['selected_proposal'],inputs['quotes'],roundtrip_cost_paise=inputs.get('roundtrip_cost_paise'))
+        else:
+            metrics = {'gross_payoff':None,'unavailable_reasons':{'gross_payoff':'captured_proposal_and_quotes_required'}}
+        if inputs.get('fee_transactions'):
+            metrics['fee_estimate'] = declared_fee_estimate(inputs['fee_transactions'])
+            metrics.setdefault('limitations',[]).extend(metrics['fee_estimate']['limitations'])
+            if metrics['fee_estimate']['total_paise'] is None:
+                metrics.setdefault('unavailable_reasons',{})['fee_estimate.total_paise']='one_or_more_fee_components_unknown'
     elif name == 'get_portfolio_attribution_and_rebalance':
         metrics = portfolio_attribution(inputs.get('verified_returns',[]),benchmark=inputs.get('benchmark_returns'),bank_benchmark=inputs.get('bank_returns'))
         metrics['hrp_weights'] = inputs.get('verified_hrp_weights')
