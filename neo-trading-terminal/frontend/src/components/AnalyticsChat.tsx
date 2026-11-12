@@ -21,6 +21,8 @@ export default function AnalyticsChat({ context }: { context: Context }) {
   const inFlight = useRef(false)
   const action = useRef<string | null>(null)
   const requestQuestion = useRef('')
+  const [historicalInput, setHistoricalInput] = useState('')
+  const requestInput = useRef<unknown>(null)
 
   async function run(resume: boolean) {
     if (inFlight.current || (!resume && !question.trim())) return
@@ -28,6 +30,14 @@ export default function AnalyticsChat({ context }: { context: Context }) {
     setBusy(true)
     setError('')
     if (!resume) {
+      try {
+        requestInput.current = historicalInput.trim() ? JSON.parse(historicalInput) : null
+      } catch {
+        setError('Historical input must be valid JSON.')
+        inFlight.current = false
+        setBusy(false)
+        return
+      }
       requestQuestion.current = question.trim()
       action.current = null
       setResult(null)
@@ -35,6 +45,7 @@ export default function AnalyticsChat({ context }: { context: Context }) {
     try {
       const reply = await api<Result>('/options-agent/unified-chat', 'POST', {
         analytics_mode: true, message: requestQuestion.current, context,
+        ...(requestInput.current ? { historical_input: requestInput.current } : {}),
         ...(resume ? { continuation_id: result?.continuation_id, continuation_action_id: action.current } : {}),
       })
       if (reply.scope !== 'analytics' || !Array.isArray(reply.stages)) throw new Error('Unexpected analytics response.')
@@ -55,6 +66,12 @@ export default function AnalyticsChat({ context }: { context: Context }) {
       <label>Analytics question
         <input value={question} maxLength={2000} disabled={busy} onChange={event => setQuestion(event.target.value)} />
       </label>
+      <details><summary>Optional historical inputs</summary>
+        <label>Declared historical input JSON
+          <textarea value={historicalInput} maxLength={2000000} disabled={busy} onChange={event => setHistoricalInput(event.target.value)} />
+        </label>
+        <p>Include provenance, licence, matching market context and dated OHLCV or cash-flow-adjusted returns. Imported observations are labelled unverified and retain their original dates.</p>
+      </details>
       <button disabled={busy || !question.trim()} type="submit">Analyze</button>
     </form>
     {busy && <p role="status">Processing the next analytics sections…</p>}

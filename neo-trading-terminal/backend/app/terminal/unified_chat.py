@@ -28,8 +28,17 @@ class UnifiedChatRequest(BaseModel):
     report_kind: Literal['strategy', 'scan', 'alert', 'backtest'] | None = None
     report_id: UUID | None = None
     analytics_mode: bool = False
+    historical_input: dict | None = None
     continuation_id: UUID | None = None
     continuation_action_id: UUID | None = None
+
+    @field_validator('historical_input')
+    @classmethod
+    def validated_historical_input(cls, value):
+        if value is not None:
+            from .analytics_inputs import HistoricalAnalyticsInput
+            return HistoricalAnalyticsInput.model_validate(value).model_dump(mode='json')
+        return None
 
     @field_validator('message')
     @classmethod
@@ -194,6 +203,8 @@ def _record_parent_run(service, user_id, run_id, status, started, detail):
 
 
 async def dispatch_unified(service, user_id, body):
+    if body.historical_input is not None and not body.analytics_mode:
+        raise HTTPException(422, 'Historical analytics inputs require analytics mode.')
     if (body.continuation_id is not None or body.continuation_action_id is not None) and not body.analytics_mode:
         raise HTTPException(422, 'Continuations require analytics mode.')
     if body.analytics_mode:

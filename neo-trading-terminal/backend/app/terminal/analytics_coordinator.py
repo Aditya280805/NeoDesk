@@ -32,8 +32,8 @@ async def dispatch_analytics(service, user, body):
         policy = await coordinator._work(user, budget, service.risk_store.get_policy, user)
         if body.continuation_id is not None:
             return await coordinator.resume(user, str(body.continuation_id), str(body.continuation_action_id), body.message,
-                body.context, policy_revision=policy.revision, risk_policy=policy, budget=budget)
-        return await coordinator.start(user, body.message, body.context, policy_revision=policy.revision, risk_policy=policy, budget=budget)
+                body.context, policy_revision=policy.revision, risk_policy=policy, budget=budget, historical_input=body.historical_input)
+        return await coordinator.start(user, body.message, body.context, policy_revision=policy.revision, risk_policy=policy, budget=budget, historical_input=body.historical_input)
     except TimeoutError:
         raise HTTPException(504, 'Analytics turn timed out. Retry after the current request finishes.') from None
     except ValueError:
@@ -84,10 +84,17 @@ class AnalyticsCoordinator:
         return await self.capture.work.run(user, lambda: asyncio.to_thread(function, *args),
             timeout=max(0, budget.deadline-time.monotonic()))
 
-    def _binding(self, user, question, context, policy_revision):
+    def _binding(self, user, question, context, policy_revision, historical_input=None):
         if type(user) is not int or user <= 0:
             raise ValueError('Authenticated owner required')
+        if historical_input is not None:
+            from .analytics_inputs import HistoricalAnalyticsInput
+            value = HistoricalAnalyticsInput.model_validate(historical_input)
+            if value.context != context:
+                raise ValueError('Imported market context differs')
+            historical_input = value.model_dump(mode='json')
         return dict(request=hashlib.sha256(question.encode()).hexdigest(), context=context.model_dump_json(),
+                    historical_input_hash=hashlib.sha256(json.dumps(historical_input,sort_keys=True,allow_nan=False).encode()).hexdigest(),
                     session_generation=self.capture.market.session_generation(user), policy_revision=policy_revision,
                     coordinator_version='analytics-coordinator.1')
 
@@ -103,12 +110,13 @@ class AnalyticsCoordinator:
         for _, payload in captured.evidence_json:
             item = AnalyticsEvidence.model_validate_json(payload)
             age = (now-item.retrieved_at).total_seconds()
-            if age < -5 or age > 600 or item.observed_at and (now-item.observed_at).total_seconds() > 600:
+            historical = item.coverage.get('input_provenance')=='user_declared_unverified'
+            if age < -5 or age > 600 or not historical and item.observed_at and (now-item.observed_at).total_seconds() > 600:
                 raise ValueError('Evidence expired; refresh required')
 
-    async def start(self, user, question, context, *, policy_revision, risk_policy=None, budget=None):
+    async def start(self, user, question, context, *, policy_revision, risk_policy=None, budget=None, historical_input=None):
         budget = budget or TurnBudget()
-        binding = await self._work(user, budget, self._binding, user, question, context, policy_revision)
+        binding = await self._work(user, budget, self._binding, user, question, context, policy_revision, historical_input)
         decision = await self.classifier(self.config, question, budget)
         if not decision.delegated_agents:
             return dict(scope='analytics', status='clarify' if decision.mode=='CLARIFY' else 'rejected',
@@ -118,7 +126,7 @@ class AnalyticsCoordinator:
         names = list(decision.requested_sections) if decision.requested_sections else sorted(allowed)
         if len(set(names)) != len(names) or not set(names) <= allowed or any(not set(names) & TOOLS_BY_ROLE[role] for role in decision.delegated_agents):
             raise ValueError('Router requested unauthorized sections')
-        captured = await self.capture.capture(user, context, names, budget=budget)
+        captured = await self.capture.capture(user, context, names, budget=budget, historical_input=historical_input)
         state = dict(captured=dict(owner_id=captured.owner_id, session_generation=captured.session_generation,
             context_json=captured.context_json, evidence_json=list(captured.evidence_json)),
             pending=[dict(role=role, tools=[name for name in names if name in TOOLS_BY_ROLE[role]])
@@ -127,9 +135,9 @@ class AnalyticsCoordinator:
         key = await self._work(user, budget, self.continuations.start, user, binding, state) if state['pending'] else None
         return {**response, 'continuation_id': key}
 
-    async def resume(self, user, key, action, question, context, *, policy_revision, risk_policy=None, budget=None):
+    async def resume(self, user, key, action, question, context, *, policy_revision, risk_policy=None, budget=None, historical_input=None):
         budget = budget or TurnBudget()
-        binding = await self._work(user, budget, self._binding, user, question, context, policy_revision)
+        binding = await self._work(user, budget, self._binding, user, question, context, policy_revision, historical_input)
         claim = await self._work(user, budget, self.continuations.claim, user, key, binding, action)
         if 'replay' in claim:
             raw = claim['state']['captured']

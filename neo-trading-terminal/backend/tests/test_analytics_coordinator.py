@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -88,4 +89,33 @@ def test_generation_lookup_does_not_block_event_loop(tmp_path):
         finally:
             release.set()
         assert (await task)['status']=='clarify'
+    asyncio.run(run())
+
+
+def test_historical_import_is_bound_to_continuation_and_not_recaptured(tmp_path):
+    from app.terminal.analytics_capture import AnalyticsCaptureService
+    from app.terminal.analytics_coordinator import AnalyticsCoordinator
+    from app.terminal.analytics_continuation import Continuations
+    from test_analytics_inputs import declared
+    market, portfolio, snapshots, store = sources(tmp_path)
+    capture = AnalyticsCaptureService(market,store,snapshots,portfolio)
+    raw = declared()
+    # Historical observations remain useful as historical evidence, never live claims.
+    raw['observed_at'] -= timedelta(days=100)
+    raw['bars'] = [{**bar,'time':bar['time']-timedelta(days=100)} for bar in raw['bars']]
+    raw['return_dates'] = [t-timedelta(days=100) for t in raw['return_dates']]
+    classifier = AsyncMock(return_value=RoutingDecision(mode='SINGLE_OPTIONS',delegated_agents=('options_trading_analysis',)))
+    calls = []
+    async def stage(config,mcp,captured,user,role,question,names,budget,**kwargs):
+        calls.append(names[:2])
+        return dict(role=role,status='partial' if len(names)>2 else 'completed',pending_tools=names[2:],evidence={},interpretation='Historical coverage.',claims=[])
+    coordinator = AnalyticsCoordinator(SimpleNamespace(),capture,None,Continuations(store),classifier=classifier,stage=stage)
+    async def run():
+        first = await coordinator.start(7,'Explain',OptionsContext(),policy_revision=0,historical_input=raw)
+        altered = {**raw,'provenance':'Changed source'}
+        with pytest.raises(ValueError):
+            await coordinator.resume(7,first['continuation_id'],'changed','Explain',OptionsContext(),policy_revision=0,historical_input=altered)
+        result = await coordinator.resume(7,first['continuation_id'],'correct','Explain',OptionsContext(),policy_revision=0,historical_input=raw)
+        assert result['status']=='completed' and len(calls)==2
+        assert snapshots.fetch.call_count==1
     asyncio.run(run())

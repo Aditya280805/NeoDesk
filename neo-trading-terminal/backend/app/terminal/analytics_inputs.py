@@ -2,6 +2,7 @@
 import hashlib
 import math
 from typing import Literal
+from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
 
 from pydantic import AwareDatetime, Field, model_validator
@@ -35,6 +36,7 @@ class HistoricalAnalyticsInput(Contract):
     vix_history: tuple[float, ...] = Field(default=(), max_length=500)
     return_dates: tuple[AwareDatetime, ...] = Field(default=(), max_length=5000)
     cash_flow_adjusted_returns: tuple[float, ...] = Field(default=(), max_length=5000)
+    return_frequency: Literal['daily'] = 'daily'
     benchmark_returns: tuple[float, ...] = Field(default=(), max_length=5000)
     bank_returns: tuple[float, ...] = Field(default=(), max_length=5000)
 
@@ -47,6 +49,9 @@ class HistoricalAnalyticsInput(Contract):
                 raise ValueError('Ordered nonfuture observations required')
         if len(self.return_dates) != len(self.cash_flow_adjusted_returns):
             raise ValueError('Dated returns required')
+        days = [value.astimezone(ZoneInfo('Asia/Kolkata')).date() for value in self.return_dates]
+        if len(set(days)) != len(days):
+            raise ValueError('Return series requires at most one observation per trading day')
         for series in (self.cash_flow_adjusted_returns, self.benchmark_returns, self.bank_returns):
             if any(not math.isfinite(value) or value <= -1 for value in series):
                 raise ValueError('Invalid simple returns')

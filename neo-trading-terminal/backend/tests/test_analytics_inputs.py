@@ -40,6 +40,9 @@ def test_invalid_history_is_rejected():
     raw = declared()
     raw['cash_flow_adjusted_returns'][0]=float('nan')
     with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
+    raw = declared()
+    raw['return_dates'][1] = raw['return_dates'][0]+timedelta(minutes=1)
+    with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
 
 
 def test_import_calculations_preserve_unverified_provenance(tmp_path):
