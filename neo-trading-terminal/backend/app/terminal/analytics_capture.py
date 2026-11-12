@@ -6,7 +6,7 @@ results contain calculated evidence only, never raw portfolio/account envelopes.
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from threading import Event
 from contextlib import contextmanager
 
@@ -36,9 +36,10 @@ class CapturedAnalytics:
 
 
 class AnalyticsCaptureService:
-    def __init__(self,market,store,snapshots,portfolio_service,*,work=None):
+    def __init__(self,market,store,snapshots,portfolio_service,*,work=None,catalogue=None):
         self.market,self.store,self.snapshots,self.portfolio = market,store,snapshots,portfolio_service
         self.work = work if work is not None else BoundedWork()
+        self.catalogue = catalogue
 
     async def capture(self,user_id,context,requested_tools,*,budget,historical_input=None):
         names = tuple(dict.fromkeys(requested_tools))
@@ -84,6 +85,8 @@ class AnalyticsCaptureService:
         inputs,refs,source_failure = {},[],None
         observed_at,coverage,limitations = None,{},[]
         imported = None
+        quote_depth = None
+        depth_reason = None
         if historical_input is not None:
             from .analytics_inputs import AnalyticsInputStore
             records = AnalyticsInputStore(self.store)
@@ -109,6 +112,35 @@ class AnalyticsCaptureService:
                 limitations.extend(str(value)[:1000] for value in chain.get('limitations',[])[:10])
                 if chain.get('exchange_timestamp'):
                     observed_at = datetime.fromisoformat(chain['exchange_timestamp'])
+                if self.catalogue is not None and set(names)&{'get_nse_oi_microstructure','get_vol_surface_and_greeks'}:
+                    if context.exchange!='nse_fo':
+                        depth_reason = 'quote_depth_adapter_supports_nse_only'
+                    else:
+                        from .options_readiness import legacy_chain_to_evidence,quotes_to_evidence
+                        check(generation)
+                        catalogue = self.catalogue.search(query=context.underlying,exchange='nse_fo',kind='OPTION',limit=5000)['items']
+                        matched = tuple(contract for contract in legacy_chain_to_evidence(chain,catalogue=catalogue).contracts
+                                        if contract.instrument_id.startswith('nse_fo|'))
+                        if not matched or len(matched)>50:
+                            depth_reason = 'no_unambiguous_bounded_catalogue_quote_batch'
+                        else:
+                            check(generation)
+                            try:
+                                rows = self.market.call('quotes',user_id=user_id,quote_type='all',deadline_monotonic=deadline,
+                                    instrument_tokens=[{'exchange_segment':'nse_fo','instrument_token':contract.instrument_id.split('|',1)[1]} for contract in matched])
+                            except BrokerError:
+                                depth_reason = 'broker_quote_depth_unavailable'
+                            else:
+                                check(generation)
+                                depth = quotes_to_evidence(rows,matched,datetime.now(UTC))
+                                quote_depth = depth.model_dump(mode='json')
+                                reported_pairs = sum(quote.bid is not None and quote.ask is not None for quote in depth.quotes)
+                                if not reported_pairs:
+                                    depth_reason = 'broker_returned_no_bid_ask_pairs'
+                                refs.append(str(depth.evidence_id))
+                                coverage['quote_depth'] = dict(scope='catalogue_matched_contracts_only',requested=len(matched),returned=len(depth.quotes),
+                                    reported_bid_ask_pairs=reported_pairs,exchange_timestamp_verified=False,underlying_identity_verified=False)
+                                limitations.extend(depth.limitations)
         # Do not reconstruct Greeks, return history, margins or verified contract
         # identities from the chain's LTP-only rows. Their source adapters must
         # supply those inputs explicitly in a future capture extension.
@@ -116,6 +148,13 @@ class AnalyticsCaptureService:
         for name in names:
             check(generation)
             item = calculate_evidence(name,inputs,source_refs=tuple(refs),observed_at=observed_at)
+            if name in ('get_nse_oi_microstructure','get_vol_surface_and_greeks'):
+                if quote_depth is not None:
+                    item = item.model_copy(update={'metrics':{**item.metrics,'broker_quote_depth':quote_depth},
+                        'status':'PARTIAL' if reported_pairs or item.status=='AVAILABLE' else item.status})
+                if depth_reason is not None:
+                    item = item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'quote_depth':depth_reason},
+                        'status':'PARTIAL' if item.status=='AVAILABLE' else item.status})
             if imported is not None and name in ('get_technical_regime_snapshot','get_portfolio_attribution_and_rebalance','run_spot_vix_cvar_stress_matrix','get_vol_surface_and_greeks','get_nse_oi_microstructure','compute_indian_statutory_costs_and_payoff','check_sebi_and_mwpl_compliance'):
                 item = item.model_copy(update={'observed_at':imported.observed_at,
                     'status':'PARTIAL' if item.status=='AVAILABLE' else item.status,

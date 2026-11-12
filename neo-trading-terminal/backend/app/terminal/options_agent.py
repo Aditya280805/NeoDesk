@@ -51,7 +51,7 @@ class OptionsAgent:
             from .analytics_runtime import BoundedWork
             from .analytics_store import AnalyticsStore
             self.analytics_capture = AnalyticsCaptureService(market,AnalyticsStore(store.path),self.mcp.snapshots,
-                portfolio_service,work=BoundedWork(pending=self.mcp.pending))
+                portfolio_service,work=BoundedWork(pending=self.mcp.pending),catalogue=store)
         with store.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS option_chat_conversations (

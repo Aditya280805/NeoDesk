@@ -8,7 +8,7 @@ Remaining acceptance gaps:
 
 | Area | Required completion evidence |
 | --- | --- |
-| Verified proposals | Canonical option/underlying tokens, contract-specific lot/expiry metadata, timestamped bid/ask, forward/rate sources, and fixtures proving contradictory identities reject. Legacy chain/catalogue mapping explicitly does not establish these. |
+| Verified proposals | Canonical underlying identity, contract-specific verified lot/expiry metadata, exchange-time proof and forward/rate sources. Matched token bid/ask enrichment is now wired into opt-in analytics, with contradictory quote-token rejection tests; catalogue matching still does not establish verified identity or proposal eligibility. |
 | Live regulatory checks | Applicable dated SEBI/exchange rules, instrument classification, published ban/MWPL inputs and verified margin/position-limit bases; complete-account and post-proposal combination tests. Current conservative checks are incomplete. |
 | Fee/payoff coverage | Verified exchange/broker schedules and aggregation policy, quote/expiry context and dated source revisions. Statutory arithmetic exists; unknown fee components are unavailable. |
 | Attribution/HRP | Eligible cash-asset adjusted histories, complete trade/sector mappings, cash-flow adjustments and an authenticated source adapter. Imported return ratios work; complete attribution does not. |
