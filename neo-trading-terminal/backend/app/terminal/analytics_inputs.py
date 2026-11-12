@@ -54,6 +54,18 @@ class DeclaredRiskObservation(Contract):
     iv: float | None = Field(default=None,ge=1e-8,le=10,allow_inf_nan=False)
 
 
+class DeclaredSurfaceRow(Contract):
+    contract_id: str = Field(min_length=1,max_length=100)
+    side: Literal['CALL','PUT']
+    strike: float = Field(ge=1e-8,le=1e12,allow_inf_nan=False)
+    expiry_at: AwareDatetime
+    forward: float = Field(ge=1e-8,le=1e12,allow_inf_nan=False)
+    rate: float = Field(ge=-1,le=1,allow_inf_nan=False)
+    iv: float = Field(ge=1e-8,le=10,allow_inf_nan=False)
+    open_interest: int = Field(strict=True,ge=0,le=1000000000)
+    lot_size: int = Field(strict=True,gt=0,le=100000)
+
+
 class HistoricalAnalyticsInput(Contract):
     schema_version: Literal['analytics-input.1'] = 'analytics-input.1'
     context: OptionsContext
@@ -70,11 +82,27 @@ class HistoricalAnalyticsInput(Contract):
     risk_positions: tuple[DeclaredRiskPosition,...] = Field(default=(),max_length=100)
     risk_history: dict[str,tuple[DeclaredRiskObservation,...]] = Field(default_factory=dict,max_length=100)
     risk_history_basis: Literal['current_contract_equivalent_source_declared'] | None = None
+    surface_rows: tuple[DeclaredSurfaceRow,...] = Field(default=(),max_length=500)
+    surface_spot: float | None = Field(default=None,ge=1e-8,le=1e12,allow_inf_nan=False)
+    gex_sign_assumption: Literal['calls_positive_puts_negative'] | None = None
 
     @model_validator(mode='after')
     def aligned(self):
-        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions:
+        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows:
             raise ValueError('At least one historical series required')
+        if len({row.contract_id for row in self.surface_rows})!=len(self.surface_rows):
+            raise ValueError('Unique surface contract IDs required')
+        pricing = {}
+        for row in self.surface_rows:
+            if not 0<(row.expiry_at-self.observed_at).total_seconds()<=3650*86400:
+                raise ValueError('Active bounded expiry required')
+            key = row.expiry_at
+            terms = (row.forward,row.rate)
+            if key in pricing and pricing[key]!=terms:
+                raise ValueError('Contradictory per-expiry pricing')
+            pricing[key] = terms
+        if self.gex_sign_assumption and (not self.surface_rows or self.surface_spot is None):
+            raise ValueError('GEX requires declared surface and spot')
         identifiers = [position.contract_id for position in self.risk_positions]
         if len(set(identifiers))!=len(identifiers) or any(position.underlying!=self.context.underlying for position in self.risk_positions):
             raise ValueError('Unique positions matching context required')
@@ -140,6 +168,13 @@ class AnalyticsInputStore:
         if value.context != context:
             raise ValueError('Input dataset market context differs')
         inputs = {}
+        if value.surface_rows:
+            inputs.update(surface_rows=[row.model_dump() for row in value.surface_rows],forward=value.surface_rows[0].forward,
+                rate=value.surface_rows[0].rate,as_of=value.observed_at,
+                pricing_by_expiry={row.expiry_at.isoformat():dict(forward=row.forward,rate=row.rate) for row in value.surface_rows})
+            if value.gex_sign_assumption:
+                inputs.update(gex_rows=[{**row.model_dump(),'tau':(row.expiry_at-value.observed_at).total_seconds()/(365*86400)} for row in value.surface_rows],
+                    gex_spot=value.surface_spot,gex_sign_assumption=value.gex_sign_assumption)
         if value.bars:
             inputs.update(bars=[bar.model_dump(mode='json') for bar in value.bars], vix_history=list(value.vix_history))
         if value.cash_flow_adjusted_returns:

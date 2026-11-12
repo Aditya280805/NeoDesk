@@ -10,7 +10,7 @@ from .analytics_contracts import AnalyticsEvidence, sanitize_quant_payload
 from .analytics_runtime import TOOLS_BY_ROLE
 from .quant_technical import technical_regime
 from .quant_surface import volatility_surface
-from .quant_microstructure import oi_microstructure
+from .quant_microstructure import oi_microstructure, gamma_exposure_proxy
 from .quant_attribution import portfolio_attribution
 from .quant_compliance import compliance_checks
 from .quant_risk import stress_matrix, historical_repricing
@@ -49,6 +49,10 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
             iv_history=inputs.get('iv_history',()),realized_volatility=inputs.get('realized_volatility'),pricing_by_expiry=inputs.get('pricing_by_expiry'))
     elif name == 'get_nse_oi_microstructure':
         metrics = oi_microstructure(inputs['chain_rows'])
+        if inputs.get('gex_rows') is not None:
+            proxy = gamma_exposure_proxy(inputs['gex_rows'],inputs['gex_spot'],inputs['gex_sign_assumption'])
+            metrics['limitations'].extend(proxy.pop('limitations'))
+            metrics.update(proxy)
     elif name == 'get_participant_fii_dii_flow':
         # Supplied only by ParticipantReports parser/cache, never inferred from prices.
         metrics = dict(inputs['participant_report'])

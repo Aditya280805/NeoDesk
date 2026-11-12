@@ -1,5 +1,16 @@
 # Execution state
 
+## Current authoritative checkpoint (supersedes historical notes below)
+
+- Main checkout: C:/Users/Aditya Bose/OneDrive/Documents/TRADING, codex/local-specialist-agents. Preserve concurrent provider/harness/server edits.
+- Implemented: default-off snapshot/composite chat, owner/role-scoped MCP evidence, counted two-read specialist stages, 30-second turn budgets, fenced continuation storage, typed proposal transport, evidence UI and import input UI. Imported technical, return, risk and surface scenarios are explicitly unverified. Live legacy chain supports OI; canonical proposal generation still lacks verified live identity inputs.
+- Latest source slice: typed surface inputs calculate IV/Greeks with ACT/365 expiry and consistent per-expiry forward/rate assumptions; optional signed-OI GEX proxy requires an explicit inventory sign scenario and spot. Chain-rule scaling and grid-node flip behavior are tested; no dealer ownership is inferred. Zero chains do not produce invented flips.
+- Verification for latest slice: full backend run 732 passed (started before final GEX grid-node fix); 47 focused tests passed after that review fix, frontend 91 tests passed, lint/build passed, pip check clean, options offline eval 6/6, specialist offline eval 18/18, platform offline eval status passed. No live credentials used. These checks do not prove actual model quality, broker connectivity or complete feature coverage.
+- Read COMPLETION-GAPS.md for exact incomplete acceptance criteria. Remaining internal work: verified contract/depth integration, complete fee/rule sourcing and application, portfolio/trade/sector/HRP capture, and combined-account post-proposal calculations. Live acceptance requires explicit broker/model test authorization and working access. These gaps are not all external blockers.
+- Do not report P0–P11 complete or reuse earlier informal percentage estimates. Next resume should read this section and COMPLETION-GAPS.md, inspect git status, and work on the first unresolved acceptance criterion. Historical notes below are provenance, not the current TODO list.
+
+## Historical checkpoint records (superseded where inconsistent)
+
 - Baseline: 57ebe80, codex/local-specialist-agents, clean before this run.
 - Active: opt-in composite coordinator, durable continuation integration and initial evidence/progress UI implemented; source coverage and final integration verification remain.
 - Completed: P0 baseline (40 passing specialist/router regressions), strict versioned routing/evidence/proposal contracts, durable records.
