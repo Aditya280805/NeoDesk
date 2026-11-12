@@ -110,6 +110,19 @@ class DeclaredFeeTransaction(Contract):
         return self
 
 
+class DeclaredComplianceRule(Contract):
+    contract_id: str = Field(min_length=1,max_length=100)
+    source: str = Field(min_length=1,max_length=1000)
+    revision: str = Field(min_length=1,max_length=100)
+    instrument_scope: Literal['stock_derivative','index_derivative','cash']
+    valid_from: date
+    valid_until: date
+    lot_size: int | None = Field(default=None,strict=True,gt=0,le=100000)
+    ban_active: StrictBool | None = None
+    base_futeq: float | None = Field(default=None,ge=-1e12,le=1e12,allow_inf_nan=False)
+    current_futeq: float | None = Field(default=None,ge=-1e12,le=1e12,allow_inf_nan=False)
+
+
 class HistoricalAnalyticsInput(Contract):
     schema_version: Literal['analytics-input.1'] = 'analytics-input.1'
     context: OptionsContext
@@ -136,6 +149,7 @@ class HistoricalAnalyticsInput(Contract):
     trade_period_start: AwareDatetime | None = None
     trade_period_end: AwareDatetime | None = None
     fee_transactions: tuple[DeclaredFeeTransaction,...] = Field(default=(),max_length=200)
+    compliance_rules: tuple[DeclaredComplianceRule,...] = Field(default=(),max_length=100)
 
     @model_validator(mode='after')
     def aligned(self):
@@ -173,6 +187,15 @@ class HistoricalAnalyticsInput(Contract):
         if self.gex_sign_assumption and (not self.surface_rows or self.surface_spot is None):
             raise ValueError('GEX requires declared surface and spot')
         identifiers = [position.contract_id for position in self.risk_positions]
+        rule_ids = [rule.contract_id for rule in self.compliance_rules]
+        observation_day = self.observed_at.astimezone(ZoneInfo('Asia/Kolkata')).date()
+        if len(set(rule_ids))!=len(rule_ids) or not set(rule_ids)<=set(identifiers):
+            raise ValueError('Unique compliance rules must reference captured positions')
+        position_kinds = {position.contract_id:position.kind for position in self.risk_positions}
+        if any((rule.instrument_scope=='cash')!=(position_kinds[rule.contract_id]=='equity') for rule in self.compliance_rules):
+            raise ValueError('Compliance scope contradicts declared position kind')
+        if any(not rule.valid_from<=observation_day<=rule.valid_until for rule in self.compliance_rules):
+            raise ValueError('Rules must be effective at declared valuation')
         if len(set(identifiers))!=len(identifiers) or any(position.underlying!=self.context.underlying for position in self.risk_positions):
             raise ValueError('Unique positions matching context required')
         if any(position.expiry_at is not None and (position.expiry_at-self.observed_at).total_seconds()>3650*86400 for position in self.risk_positions):
@@ -269,4 +292,6 @@ class AnalyticsInputStore:
                 inputs['risk_positions'].append(risk_row)
             if value.risk_history:
                 inputs['risk_history'] = {key:[row.model_dump(mode='json') for row in series] for key,series in value.risk_history.items()}
+            if value.compliance_rules:
+                inputs['rules'] = {'declared_records':[rule.model_dump(mode='json') for rule in value.compliance_rules]}
         return inputs, f'user-import:{identity}:{row[0]}', value
