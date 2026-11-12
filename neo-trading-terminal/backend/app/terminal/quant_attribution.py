@@ -80,6 +80,9 @@ def declared_attribution(bundle):
     cash = [asset for asset in assets if asset['kind'] in ('cash_equity','cash_etf')]
     eligible = {asset['asset_id'] for asset in cash}
     result = dict(hrp_weights=None,sector_allocation=None,cash_asset_hhi=None,cash_sector_hhi=None,cash_correlation_matrix=None,hrp_coverage={'excluded_assets':[]},unavailable_reasons={})
+    result['sector_performance'],performance_reason = cash_sector_performance(cash,bundle['dates'],complete=bundle.get('cash_sleeve_history_complete') is True)
+    if performance_reason:
+        result['unavailable_reasons']['sector_performance']=performance_reason
     if assets:
         prices = pd.DataFrame({asset['asset_id']:asset['adjusted_prices'] for asset in assets},index=bundle['dates'])
         selected = prices[[key for key in prices.columns if key in eligible]]
@@ -88,7 +91,9 @@ def declared_attribution(bundle):
         if nondegenerate:
             result['cash_correlation_matrix'] = selected[nondegenerate].pct_change(fill_method=None).dropna().corr().to_dict()
         result['correlation_coverage'] = dict(basis='declared_adjusted_daily_cash_price_returns',observations=max(0,len(prices)-1),excluded_assets=[key for key in prices if key not in nondegenerate])
-        if len(selected.columns)>1 and (not np.all(np.isfinite(variances)) or (variances<=RETURN_STD_FLOOR**2).any()):
+        if len(prices)<30:
+            hrp=dict(weights=None,reason='insufficient_adjusted_price_history',excluded_assets=[key for key in prices.columns if key not in eligible])
+        elif len(selected.columns)>1 and (not np.all(np.isfinite(variances)) or (variances<=RETURN_STD_FLOOR**2).any()):
             hrp = dict(weights=None,reason='zero_variance_cash_returns',excluded_assets=[key for key in prices.columns if key not in eligible])
         else:
             hrp = hrp_weights(prices,eligible_assets=eligible)
@@ -113,5 +118,54 @@ def declared_attribution(bundle):
         result['unavailable_reasons'].update(win_rate='complete_closed_trade_history_required',profit_factor='complete_closed_trade_history_required')
     result['trade_coverage'] = dict(period_start=bundle.get('trade_period_start'),period_end=bundle.get('trade_period_end'),
         completeness='user_declared_complete' if bundle['trade_history_complete'] else 'partial',closed_trade_count=len(trades))
-    result['limitations'] = ['Cash-only HRP and sector allocation cover declared assets; derivatives excluded. Sector allocation is not sector performance attribution. Trade P&L and completeness are user declarations.']
+    result['limitations'] = ['Cash-only metrics cover declared assets; derivatives excluded. Current sector allocation is separate from historical performance using declared daily beginning weights. Trade P&L, cash history, adjustments and completeness are user declarations.']
     return result
+
+
+def cash_sector_performance(assets,dates,*,complete):
+    """Exact forward-linked arithmetic contributions for a declared cash sleeve.
+
+    Beginning weights and adjusted returns must describe every interval; current
+    holdings weights are never backfilled into history. This is not full-account
+    attribution, independently verified TWR or an execution recommendation.
+    """
+    import math
+    periods=len(dates)-1
+    if not complete or not assets or periods<1 or any(len(asset.get('beginning_values_paise',()))!=periods for asset in assets):
+        return None,'complete_daily_cash_sleeve_weights_required'
+    sectors=tuple(sorted({asset.get('sector') or 'UNCLASSIFIED' for asset in assets}))
+    contributions={sector:[] for sector in sorted(sectors)}
+    standalone={sector:1. for sector in sorted(sectors)}
+    totals=[]
+    for index in range(periods):
+        denominator=sum(asset['beginning_values_paise'][index] for asset in assets)
+        if denominator<=0:
+            return None,'positive_daily_cash_sleeve_beginning_value_required'
+        day_values={sector:0 for sector in sectors}
+        day_pnl={sector:0. for sector in sectors}
+        for asset in assets:
+            sector=asset.get('sector') or 'UNCLASSIFIED'
+            value=asset['beginning_values_paise'][index]
+            daily_return=asset['adjusted_prices'][index+1]/asset['adjusted_prices'][index]-1
+            day_values[sector]+=value
+            day_pnl[sector]+=value*daily_return
+        for sector in sectors:
+            contributions[sector].append(day_pnl[sector]/denominator)
+            standalone[sector]=standalone[sector]*(1+day_pnl[sector]/day_values[sector]) if day_values[sector]>0 and standalone[sector] is not None else None
+        totals.append(sum(contributions[sector][-1] for sector in sectors))
+    linked=dict.fromkeys(sorted(sectors),0.)
+    growth=1.
+    for index in reversed(range(periods)):
+        for sector in sectors:
+            linked[sector]+=contributions[sector][index]*growth
+        growth*=1+totals[index]
+    if not math.isfinite(growth) or any(not math.isfinite(value) for value in linked.values()):
+        return None,'nonfinite_linked_cash_sleeve_growth'
+    return dict(cash_sleeve_return=growth-1,observations=periods,
+        period_start=dates[0].isoformat(),period_end=dates[-1].isoformat(),complete_account_coverage=False,
+        basis='user_declared_complete_cash_sleeve_daily_beginning_values_and_adjusted_price_returns',
+        method='forward_linked_daily_arithmetic_contributions.1',
+        limitation='Supplied beginning weights apply throughout each return interval; intraday trading effects are not modeled. Cash-sleeve scenario only, not verified full-account attribution.',
+        sectors={sector:dict(linked_contribution=linked[sector],
+            standalone_return=standalone[sector]-1 if standalone[sector] is not None and math.isfinite(standalone[sector]) else None,
+            standalone_unavailable_reason=None if standalone[sector] is not None and math.isfinite(standalone[sector]) else 'zero_sector_value_interval_or_nonfinite_growth') for sector in sorted(sectors)}),None

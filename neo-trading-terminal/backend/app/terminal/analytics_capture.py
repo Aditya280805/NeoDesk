@@ -94,6 +94,7 @@ class AnalyticsCaptureService:
         input_dataset_id = None
         account_report = None
         account_reason = None
+        participant_reason = None
         account_refs = ()
         quote_depth = None
         depth_reason = None
@@ -121,18 +122,27 @@ class AnalyticsCaptureService:
             if request is not None and 'get_participant_fii_dii_flow' in names:
                 from .analytics_sources import ParticipantReports
                 reports = ParticipantReports(self.store)
-                inputs['participant_report'] = reports.parse_report(request['date'],request['csv']) if request['csv'] is not None else reports.fetch(request['date'],deadline=deadline)
+                if request['csv'] is not None:
+                    inputs['participant_report'] = reports.parse_report(request['date'],request['csv'])
+                else:
+                    import httpx
+                    try:
+                        inputs['participant_report'] = reports.fetch(request['date'],deadline=deadline)
+                    except (httpx.HTTPError,ValueError):
+                        check(generation)
+                        participant_reason='official_participant_source_unavailable_or_invalid'
                 if request['csv'] is not None:
                     imported_tools.add('get_participant_fii_dii_flow')
                 history_request = inputs.pop('participant_history_request',{})
-                if history_request.get('reports'):
+                if history_request.get('reports') and inputs.get('participant_report') is not None:
                     imported_tools.add('get_participant_fii_dii_flow')
                     from .nse_participant_flow import participant_history_change
                     history = [reports.parse_report(row['report_date'],row['csv']) for row in history_request['reports']]
                     refs.extend('nse-participant-oi:'+row['report_date']+':'+row['checksum'] for row in history)
                     inputs['participant_report'].update(participant_history_change(inputs['participant_report'],history,
                         sessions_complete=history_request['sessions_complete'],price_return=history_request['price_return']))
-                refs.append('nse-participant-oi:'+request['date'].isoformat()+':'+inputs['participant_report']['checksum'])
+                if inputs.get('participant_report') is not None:
+                    refs.append('nse-participant-oi:'+request['date'].isoformat()+':'+inputs['participant_report']['checksum'])
         if self.risk_policy_reader is not None and set(names)&TOOLS_BY_ROLE['portfolio_risk']:
             from .portfolio_risk import evaluate_portfolio_risk
             policy = self.risk_policy_reader(user_id)
@@ -219,6 +229,8 @@ class AnalyticsCaptureService:
             check(generation)
             item_refs = (*refs,*account_refs) if name in TOOLS_BY_ROLE['portfolio_risk'] else tuple(refs)
             item = calculate_evidence(name,inputs,source_refs=item_refs,observed_at=observed_at)
+            if name=='get_participant_fii_dii_flow' and participant_reason is not None:
+                item=item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'participant_report':participant_reason}})
             if name=='get_technical_regime_snapshot' and history_source is not None:
                 item = item.model_copy(update={'observed_at':history_source['last_observation'],
                     'coverage':{**item.coverage,'source_semantics':'historical_closed_bars','history_basis':'documented_broker_candles_adjustments_unverified'},

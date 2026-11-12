@@ -12,6 +12,19 @@ TOOLS_BY_ROLE = {
 }
 
 
+def prepare_analytics_model(model,config,*,completion_limit=256):
+    model.requests_remaining=1
+    model.key_rotator=None
+    if getattr(config,'options_agent_provider',None)=='ollama':
+        # Modelfile defaults may favor creative prose; analytics needs stable
+        # classification and faithful source references, with no retry call.
+        model.temperature=0
+        model.presence_penalty=0
+        model.frequency_penalty=0
+        model.completion_remaining=completion_limit
+    return model
+
+
 @dataclass
 class TurnBudget:
     deadline: float = field(default_factory=lambda: time.monotonic()+30)

@@ -1,23 +1,30 @@
-# Execution state
+# Execution state — resume here
 
-## Resume here — 2026-11-13 verified integration (authoritative)
+Workspace: C:/Users/Aditya Bose/OneDrive/Documents/TRADING, branch codex/local-specialist-agents. Do not work in detached d51e. Previous checkpoint2945bf6; current verified slice commit subject: fix(analytics): bind live model routing and evidence choices.
 
-Workspace: `C:/Users/Aditya Bose/OneDrive/Documents/TRADING`, branch `codex/local-specialist-agents`; do not use the detached d51e worktree. Previous checkpoint `5e648f3`; identify this verified integration by the next commit, `feat(analytics): integrate validated sources, proposals and rollout controls`.
+## Authorization and external state
 
-Implemented in this integration:
-- Raw documented master metadata cross-checks with provider `neoSymbol`, underlying code, contract terms and per-contract lot. Fresh bounded bid/ask depth produces server candidates in exactly one existing options payload. Expiry-day candidates are withheld; no guessed settlement time. Broker-code identity does not verify cash token, settlement or exchange timestamp.
-- Exact gross spread payoff; entry statutory components; optional strictly contract/quantity/quote/time-bound declared fixed cost scenario. Missing broker/exchange/closing/exercise costs keep complete net payoff unknown. Safe browser paise bounds enforced.
-- Owner-private immutable imported dataset references survive continuation. Matched position/surface inputs support combined supplied-position 28-cell stress and independent historical tails; complete-account coverage remains false. Account-derived risk reports are risk-only; fast account-source failure preserves other evidence and cannot bypass session/policy/deadline checks.
-- Strict single-batch broker daily OHLCV adapter, previous OI/price normalization, six-session declared participant changes/divergence and institutional-retail heuristic; official/imported participant revisions stay distinct.
-- Effective-dated expiry ELM/calendar applicability, conditional declared additional ELM amount and aggregate FutEq limit scenarios. These do not compute complete SPAN/broker margin or certify account compliance.
-- Mounted dated IV history/RV inputs; cash-return correlation matrices, asset/sector HHI and annualized benchmark regression alpha. Intraday VIX observations cannot substitute for daily VIX history.
-- Separate default-off `ANALYTICS_TOOLS_ENABLED`, `ANALYTICS_ADVISORY_ENABLED`, `ANALYTICS_COMPOSITE_ENABLED`. Composite UI requires both tools and composite switches. Proposals require advisory switch.
-- UI session-expiry fencing, readable evidence/missing reasons, responsive desktop/mobile layout; isolated synthetic browser fixture and screenshots; 20-case router contract replay added to Linux/Windows CI. Replay is explicitly not model-quality evaluation.
+The user's next after the explicit read-only smoke request authorized scoped live broker/model validation. Do not ask again for that scope. No execution/orders/push/deploy or model-download authorization. Started existing installed Ollama service on127.0.0.1:11434; model qwen3.5:9b-q4_K_M already installed. No environment changes or model replacement. No authenticated app/python/node listener exists for broker reads; configured broker credentials do not establish an individual owner. Never infer user1. The official public NSE ban CSV again timed out.
 
-Final frozen-code verification: full backend working-tree suite **775 passed in 318.38s**; frontend **92 passed**, lint and production build passed; isolated Chrome desktop/mobile checks passed (proposal display, evidence, continuation binding, zero page errors, no mobile horizontal overflow). Options/platform/specialist/analytics offline eval modules all exited 0; router contract replay 20/20 explicitly does not measure model quality. pip check passed; staged options-agent syntax and staged diff whitespace checks passed. Earlier timing-sensitive portfolio test failure under concurrent runs passed the focused rerun and final full suite; no concurrent provider test was changed. Docker CLI is unavailable, remote CI not run, no live broker/model calls.
+## Verified additions
 
-Next work: obtain explicit read-only live broker/model validation authorization and representative sanitized dated source inputs, then complete the source-backed adapters/calculations named in COMPLETION-GAPS.md (automatic adjusted portfolio/IV/trade histories, complete fees, dated ban/MWPL and complete-account margin/limits, sector performance). Public NSE ban CSV probe timed out; do not invent its effective date/schema. Existing scenario paths remain usable with explicit missing coverage. No push/deploy or execution authorization. Preserve provider-owned .env.example, agent_harness/options_model/specialist_agents/server/router changes and their tests; only analytics constructor/status hunks from options_agent.py belong to this integration.
+- Ollama-only role_map preserves system instructions; Agno previously sent developer on the wire and this local model ignored the domain rules. Cloud role mapping unchanged. Wire regression RED→GREEN.
+- Internal RouterIntent single category binds exact public RoutingDecision roles in trusted code. Local deterministic sampling, one call/no backup retry; router128 and specialist256 completion tokens. Coordinator version2 invalidates older incompatible continuations.
+- Model selects short claim/proposal enums from consumed evidence:32 scalar choices/tool, four output claims, sixteen proposals. Server resolves exact evidence IDs/paths/proposal IDs; no extra MCP. Invalid/duplicate/unbound refs fail. Public response shapes unchanged. Qualitative interpretation bounded in schema and revalidated after selection.
+- Declared cash-sleeve sector performance uses daily beginning values and adjusted returns with forward-linked contribution reconciliation. Current weights are never backfilled. Derivatives excluded; intraday trading unmodeled; complete-account coverage false. Short histories work independently of HRP; missing/zero inputs remain scoped unavailable.
+- Official participant HTTP-source outage preserves independent evidence while session/policy/deadline checks remain strict.
+- Reproducible explicit live CLI reports, separate heldout corpus and a guarded real-model/synthetic-MCP specialist smoke.
 
-Review found VIX daily-basis error (RED then GREEN); earlier non-ISO expiry and unsafe paise findings were also fixed with regressions. Remaining source/adapter gaps are listed in COMPLETION-GAPS.md. P0–P11 must not be declared fully complete based on offline tests.
+## Evidence
 
-Read only this section and COMPLETION-GAPS.md when resuming, inspect git status/log, then load affected files. Older detailed history can be recovered from git; do not repeat completed slices.
+- Full backend working-tree suite802 passed in298.80s after production code froze. New live-CLI authorization guard was then added/tested separately: all4 eval-CLI tests passed. Prior full799 also passed. No new frontend behavior; unchanged frontend92-test/lint/build/browser checkpoint remains in2945bf6.
+- All four offline evaluation modules exited0; pip check passed. Offline replay is not model quality.
+- Canonical local live router20/20. Initial separate heldout9/10; missed levies question fixed and regression retest10/10. Initial heldout result retained; retest is no longer untouched heldout evidence. No general100% accuracy claim.
+- Real local specialist + real loopback MCP + isolated synthetic source completed with four server-rendered claims, one MCP read, released capabilities,11.75s. Broker_evaluated=false. See LIVE-VALIDATION.md and sanitized JSON reports.
+- Fresh reviewer found no blocking selection/binding issue; independently10 tests passed. Earlier review found the short-history/HRP coupling, fixed with RED→GREEN regression.
+
+## Next work
+
+Complete the source-backed gaps in COMPLETION-GAPS.md once the terminal is running and an individual account is signed in: authenticated adjusted asset/benchmark/IV/trade/cash-flow adapters, complete dated fees and ban/MWPL publication, verified margin/limits/account aggregation. Public publication availability/schema is still unverified. Broader independent model/provider coverage, remote CI and Docker remain release gates. Flags default off; P0–P11 is not fully accepted.
+
+Preserve concurrent provider work. This slice owns only the role_map field hunk in options_model.py; do not stage its other edits, .env.example, agent_harness, options_agent, specialist_agents, server/router changes or their existing provider tests. All previous analytics constructor/status hunks in options_agent.py were already committed in2945bf6. Read this file and COMPLETION-GAPS only on resume, inspect git status/log, then load affected files; do not repeat completed slices.

@@ -73,6 +73,7 @@ class DeclaredAssetHistory(Contract):
     sector: str | None = Field(default=None,min_length=1,max_length=100)
     value_paise: int = Field(strict=True,ge=0,le=1000000000000000)
     adjusted_prices: tuple[Annotated[float,Field(ge=1e-8,le=1e12,allow_inf_nan=False)],...] = Field(max_length=5000)
+    beginning_values_paise: tuple[Annotated[int,Field(strict=True,ge=0,le=1000000000000000)],...] = Field(default=(),max_length=4999)
 
 
 class DeclaredClosedTrade(Contract):
@@ -195,6 +196,7 @@ class HistoricalAnalyticsInput(Contract):
     gex_sign_assumption: Literal['calls_positive_puts_negative'] | None = None
     asset_price_dates: tuple[AwareDatetime,...] = Field(default=(),max_length=5000)
     cash_assets: tuple[DeclaredAssetHistory,...] = Field(default=(),max_length=100)
+    cash_sleeve_history_complete: StrictBool = False
     closed_trades: tuple[DeclaredClosedTrade,...] = Field(default=(),max_length=10000)
     trade_history_complete: StrictBool = False
     trade_period_start: AwareDatetime | None = None
@@ -244,11 +246,19 @@ class HistoricalAnalyticsInput(Contract):
             raise ValueError('Unique bounded asset histories required')
         if any(len(asset.adjusted_prices)!=len(self.asset_price_dates) for asset in self.cash_assets):
             raise ValueError('Aligned asset price dates required')
+        cash = [asset for asset in self.cash_assets if asset.kind in ('cash_equity','cash_etf')]
+        if any(asset.beginning_values_paise and len(asset.beginning_values_paise)!=len(self.asset_price_dates)-1 for asset in self.cash_assets):
+            raise ValueError('Beginning values must align one-to-one with daily return intervals')
+        if self.cash_sleeve_history_complete:
+            if not cash or len(self.asset_price_dates)<2 or any(len(asset.beginning_values_paise)!=len(self.asset_price_dates)-1 for asset in cash):
+                raise ValueError('Complete cash sleeve requires every cash asset daily beginning value')
+            if any(sum(asset.beginning_values_paise[i] for asset in cash)<=0 for i in range(len(self.asset_price_dates)-1)):
+                raise ValueError('Each complete cash-sleeve interval requires positive total beginning value')
         price_days = [value.astimezone(ZoneInfo('Asia/Kolkata')).date() for value in self.asset_price_dates]
         if len(price_days)!=len(set(price_days)) or any(a>=b for a,b in zip(self.asset_price_dates,self.asset_price_dates[1:])) or self.asset_price_dates and self.asset_price_dates[-1]>self.observed_at:
             raise ValueError('Ordered daily asset history required')
-        if self.cash_assets and len(self.asset_price_dates)<30:
-            raise ValueError('At least thirty aligned adjusted prices required')
+        if self.cash_assets and not self.asset_price_dates:
+            raise ValueError('Dated adjusted prices required for declared assets')
         if len({trade.trade_id for trade in self.closed_trades})!=len(self.closed_trades):
             raise ValueError('Unique closed trade IDs required')
         if self.closed_trades or self.trade_history_complete:
@@ -354,6 +364,7 @@ class AnalyticsInputStore:
         if value.cash_assets or value.closed_trades:
             inputs['declared_attribution'] = dict(assets=[asset.model_dump(mode='json') for asset in value.cash_assets],
                 dates=list(value.asset_price_dates),trades=[trade.model_dump(mode='json') for trade in value.closed_trades],
+                cash_sleeve_history_complete=value.cash_sleeve_history_complete,
                 trade_history_complete=value.trade_history_complete,
                 trade_period_start=value.trade_period_start.isoformat() if value.trade_period_start else None,
                 trade_period_end=value.trade_period_end.isoformat() if value.trade_period_end else None)

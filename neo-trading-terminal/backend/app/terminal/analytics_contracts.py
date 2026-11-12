@@ -63,6 +63,18 @@ class RoutingDecision(Contract):
         return self
 
 
+class RouterIntent(Contract):
+    """Single model classification; trusted code binds modes and ordered roles."""
+    route: Literal['OPTIONS','ANALYSIS','RISK','OPTIONS_ANALYSIS','OPTIONS_RISK',
+                   'ANALYSIS_RISK','OPTIONS_ANALYSIS_RISK','CLARIFY','REJECT']
+
+    def decision(self):
+        roles=tuple(role for domain,role in (('OPTIONS','options_trading_analysis'),('ANALYSIS','portfolio_analysis'),('RISK','portfolio_risk')) if domain in self.route.split('_'))
+        singles={'OPTIONS':'SINGLE_OPTIONS','ANALYSIS':'SINGLE_PORTFOLIO_ANALYSIS','RISK':'SINGLE_PORTFOLIO_RISK'}
+        mode=singles.get(self.route,'CLARIFY' if self.route=='CLARIFY' else 'REJECT_MUTATION_OR_UNSUPPORTED' if self.route=='REJECT' else 'COMPOSITE_PIPELINE')
+        return RoutingDecision(mode=mode,delegated_agents=roles)
+
+
 class ProposalLeg(Contract):
     contract_id: str = Field(min_length=1, max_length=100)
     underlying_key: str = Field(min_length=1,max_length=100)

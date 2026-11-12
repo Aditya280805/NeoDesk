@@ -1,5 +1,13 @@
 # Analytics foundation review
 
+## Live validation and bounded choices — 2026-11-13
+
+Actual local model testing exposed ignored developer-role instructions, malformed/truncated specialist output and unreliable copied evidence references. Ollama now preserves system on the wire (mocked real-SDK regression RED→GREEN), routing uses a compact typed intent and claims/proposals use enums resolved from consumed immutable evidence. Public IDs/paths/results stay server-derived and validated. No extra MCP read, retry or cloud fallback was added.
+
+Fresh review found no blocking mathematical, privacy or binding issue in sector performance and bounded model selection. It identified existing thirty-price import coupling that prevented short sector histories; the two-date regression failed then passed after making HRP unavailable independently. Reviewer independently ran14 earlier tests and10 selection tests. Unknown/duplicate refs, raw model IDs/values and cross-binding attempts fail validation.
+
+Full backend802 passed; explicit live-flag CLI guard tested separately. Canonical local live20/20, initial heldout9/10, corrected-case regression10/10, real-model/synthetic-source MCP smoke passed with four validated claims and one read. Initial failures and heldout distinction are documented in LIVE-VALIDATION.md. These checks do not establish broker connectivity, complete account coverage or general model correctness.
+
 ## Integration review — 2026-11-13
 
 Fresh reviewer independently ran 26 focused integration tests and found no new authorization/execution boundary blocker. Identified VIX time-basis error: 20 intraday observations could masquerade as 20 daily observations. Regression observed failing, then fixed by withholding daily VIX z-score/regime unless aligned unique ordered Indian dates establish daily basis. Separate tests now cover mounted IV/RV history, cash correlation/HHI and independent tools/advisory/composite rollout switches. Previous source-expiry normalization and browser-safe paise findings were fixed with regressions. Account-source failure degradation was likewise demonstrated RED then GREEN.

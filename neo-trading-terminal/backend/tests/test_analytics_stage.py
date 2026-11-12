@@ -49,7 +49,7 @@ def test_stage_prefetch_is_counted_and_third_section_remains_pending():
                 return kwargs['analytics_evidence'][name].model_dump(mode='json')
             yield SimpleNamespace(_snapshot=read,capability=object())
     model = SimpleNamespace(aclose=AsyncMock())
-    agent = SimpleNamespace(model=model,arun=AsyncMock(return_value=SimpleNamespace(content={'interpretation':'Coverage is limited.','claims':[]})))
+    agent = SimpleNamespace(model=model,arun=AsyncMock(return_value=SimpleNamespace(content={'interpretation':'Coverage is limited.','claim_refs':[]})))
     async def scenario():
         result = await run_specialist_stage(SimpleNamespace(),Runtime(),captured,7,'options_trading_analysis','Explain this.',names,budget,
             agent_factory=lambda config,role:agent)
@@ -74,9 +74,11 @@ def test_capture_to_real_mcp_to_specialist_claim(tmp_path):
     async def scenario():
         market,portfolio,snapshots,store = sources(tmp_path)
         captured = await AnalyticsCaptureService(market,store,snapshots,portfolio).capture(7,OptionsContext(),['get_nse_oi_microstructure'],budget=TurnBudget())
-        identity = captured.for_role('options_trading_analysis')['get_nse_oi_microstructure'].evidence_id
+        from app.terminal.analytics_selection import bind_choices
+        choices=bind_choices(captured.for_role('options_trading_analysis'))
+        reference=next(ref for ref,row in choices.payload['claim_choices'].items() if row['path']==['pcr_oi'])
         agent = SimpleNamespace(model=SimpleNamespace(aclose=AsyncMock()),arun=AsyncMock(return_value=SimpleNamespace(content={
-            'interpretation':'This describes returned strikes only.','claims':[{'evidence_id':str(identity),'path':['pcr_oi']}]})))
+            'interpretation':'This describes returned strikes only.','claim_refs':[reference]})))
         runtime = OptionsMCP(snapshots,port=0,portfolio_service=portfolio)
         budget = TurnBudget()
         async with runtime.lifespan():
@@ -103,3 +105,25 @@ def test_specialists_have_fresh_models_and_no_unbudgeted_tools(tmp_path):
     assert first.output_schema is SpecialistNarrative
     assert first.model.requests_remaining==1
     assert first.model.key_rotator is None
+
+
+def test_local_specialist_uses_deterministic_sampling_for_evidence_output(tmp_path):
+    from app.core.config import Settings
+    from app.terminal.analytics_stage import build_analytics_specialist
+    agent=build_analytics_specialist(Settings(_env_file=None,data_dir=tmp_path,options_agent_provider='ollama'),'options_trading_analysis')
+    assert agent.model.temperature==0
+    assert agent.model.presence_penalty==0
+    assert agent.model.frequency_penalty==0
+    assert agent.model.requests_remaining==1 and agent.model.key_rotator is None
+    assert agent.model.completion_remaining==256
+
+
+def test_model_facing_schema_encodes_existing_numeric_text_restriction():
+    import re
+    from app.terminal.analytics_stage import SpecialistNarrative
+    pattern=SpecialistNarrative.model_json_schema()['properties']['interpretation'].get('pattern')
+    assert pattern is not None
+    assert re.fullmatch(pattern,'Returned-chain coverage is limited.')
+    assert not re.fullmatch(pattern,'PCR is 2.0.')
+    assert not re.fullmatch(pattern,'A'*501)
+    assert not re.fullmatch(pattern,'Quoted "facts"')

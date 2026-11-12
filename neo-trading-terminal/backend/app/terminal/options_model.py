@@ -168,6 +168,8 @@ class BoundedOpenAIChat(OpenAIChat):
 class BoundedOllamaChat(BoundedOpenAIChat):
     """Ollama's local OpenAI-compatible endpoint uses max_tokens."""
 
+    role_map: dict[str,str] | None = field(default_factory=lambda:{**OpenAIChat.default_role_map,'system':'system'})
+
     def get_request_params(self, *args, **kwargs):
         params = super().get_request_params(*args, **kwargs)
         params.pop('max_completion_tokens', None)

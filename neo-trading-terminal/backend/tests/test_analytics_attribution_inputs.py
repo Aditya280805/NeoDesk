@@ -33,6 +33,82 @@ def test_annualized_regression_alpha_uses_aligned_benchmark_excess_returns():
     assert metrics['alpha_niftybank_annualized'] is None
 
 
+def test_sector_performance_uses_daily_beginning_values_and_links_contributions(tmp_path):
+    from app.terminal.analytics_inputs import AnalyticsInputStore
+    from app.terminal.analytics_engine import calculate_evidence
+    raw=declared()
+    for asset in raw['cash_assets'][:2]:
+        asset['beginning_values_paise']=[10000]*39
+    raw['cash_sleeve_history_complete']=True
+    _,_,_,store=sources(tmp_path)
+    records=AnalyticsInputStore(store)
+    saved=records.save(7,raw)
+    inputs,ref,value=records.load(7,saved['dataset_id'],OptionsContext())
+    item=calculate_evidence('get_portfolio_attribution_and_rebalance',inputs,source_refs=(ref,),observed_at=value.observed_at)
+    result=item.metrics['sector_performance']
+    assert result['complete_account_coverage'] is False
+    assert result['observations']==39
+    assert set(result['sectors'])=={'Banks','ETF'}
+    returns=[]
+    for i in range(1,40):
+        returns.append(sum((asset['adjusted_prices'][i]/asset['adjusted_prices'][i-1]-1)/2 for asset in raw['cash_assets'][:2]))
+    import math
+    expected=math.prod(1+r for r in returns)-1
+    assert result['cash_sleeve_return']==pytest.approx(expected)
+    assert sum(row['linked_contribution'] for row in result['sectors'].values())==pytest.approx(expected)
+    assert result['sectors']['Banks']['standalone_return']==pytest.approx(raw['cash_assets'][0]['adjusted_prices'][-1]/raw['cash_assets'][0]['adjusted_prices'][0]-1)
+
+
+def test_sector_performance_missing_weights_never_uses_current_values(tmp_path):
+    from app.terminal.quant_attribution import declared_attribution
+    raw=declared()
+    result=declared_attribution(dict(assets=raw['cash_assets'],dates=raw['asset_price_dates'],trades=[],trade_history_complete=False))
+    assert result['sector_performance'] is None
+    assert result['unavailable_reasons']['sector_performance']=='complete_daily_cash_sleeve_weights_required'
+    raw['cash_assets'][0]['beginning_values_paise']=[1]*38
+    with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
+
+
+def test_complete_sleeve_rejects_missing_or_zero_total_values_and_keeps_zero_sector_explicit():
+    raw=declared()
+    raw['cash_sleeve_history_complete']=True
+    with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
+    for asset in raw['cash_assets'][:2]:
+        asset['beginning_values_paise']=[0]*39
+    with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
+    raw['cash_assets'][0]['beginning_values_paise']=[10000]*39
+    value=HistoricalAnalyticsInput.model_validate(raw)
+    from app.terminal.quant_attribution import cash_sector_performance
+    result,reason=cash_sector_performance([asset.model_dump(mode='json') for asset in value.cash_assets[:2]],value.asset_price_dates,complete=True)
+    assert reason is None
+    assert result['sectors']['ETF']['linked_contribution']==0
+    assert result['sectors']['ETF']['standalone_return'] is None
+    assert result['sectors']['ETF']['standalone_unavailable_reason'] is not None
+    assert result['cash_sleeve_return']==pytest.approx(result['sectors']['Banks']['linked_contribution'])
+
+
+def test_two_price_dates_allow_sector_and_trade_metrics_without_hrp(tmp_path):
+    from app.terminal.analytics_inputs import AnalyticsInputStore
+    from app.terminal.analytics_engine import calculate_evidence
+    raw=declared()
+    raw['asset_price_dates']=raw['asset_price_dates'][-2:]
+    for asset in raw['cash_assets']:
+        asset['adjusted_prices']=asset['adjusted_prices'][-2:]
+        if asset['kind'] in ('cash_equity','cash_etf'):
+            asset['beginning_values_paise']=[10000]
+    raw['cash_sleeve_history_complete']=True
+    _,_,_,store=sources(tmp_path)
+    records=AnalyticsInputStore(store)
+    saved=records.save(7,raw)
+    inputs,ref,value=records.load(7,saved['dataset_id'],OptionsContext())
+    item=calculate_evidence('get_portfolio_attribution_and_rebalance',inputs,source_refs=(ref,),observed_at=value.observed_at)
+    assert item.metrics['sector_performance']['observations']==1
+    assert item.metrics['hrp_weights'] is None
+    assert item.metrics['hrp_coverage']['reason']=='insufficient_adjusted_price_history'
+    assert item.metrics['win_rate']==.5
+    assert item.metrics['profit_factor']==3
+
+
 def test_capture_hrp_excludes_derivatives_and_keeps_independent_trade_metrics(tmp_path):
     market,portfolio,snapshots,store = sources(tmp_path)
     async def run():

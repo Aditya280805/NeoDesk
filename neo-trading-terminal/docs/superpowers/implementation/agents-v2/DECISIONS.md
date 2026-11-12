@@ -1,5 +1,12 @@
 # Decisions and documentation
 
+- Continuation after2945bf6 authorized scoped read-only live checks. Keep that authorization in resume state; do not repeat approval requests. Broker owner identity still requires an actual authenticated application session.
+- Real local validation found Agno's system->developer wire mapping incompatible with this configured Ollama model. Preserve system for Ollama only; leave cloud mapping unchanged. Local template metadata was investigated but not changed; direct system-role probes worked.
+- Ruling: model-facing routing and evidence selection use short typed intent/reference enums, with public RoutingDecision/EvidenceClaim/StrategyProposal IDs constructed from trusted captured state. This avoids model-controlled identity/path binding and additional calls. Choices are bounded summaries (32 scalars/tool, four output claims, sixteen proposals); full source metrics remain in evidence.
+- Local analytic sampling disables creativity/repetition penalties and reserves one call:128 router completion tokens,256 specialist completion tokens. Brief single-paragraph interpretation has schema-level numeric/length restrictions plus final validation; source values remain server-rendered.
+- Declared cash-sleeve attribution uses per-interval beginning values and adjusted returns with exact forward linking of arithmetic contributions. It does not substitute current weights or model intraday trading, and does not establish complete-account performance.
+- Context7 HTTPX docs verified per-chunk read timeout semantics; retain shared application deadlines and bounded response sizes. Official Ollama OpenAI/structured-output docs checked during live transport diagnosis: https://docs.ollama.com/api/openai-compatibility and https://docs.ollama.com/capabilities/structured-outputs .
+
 - Integration 2026-11-13: separate default-off tools/advisory/composite rollout flags and bind all three into continuation identity; changing rollout invalidates resumption.
 - Source identity uses explicit documented provider neoSymbol and raw master underlying codes/terms/lots. It does not establish cash-token, settlement or exchange-time verification. Withhold expiry-day candidates without authoritative expiry-session metadata.
 - Imported IV/RV/basis/correlation/concentration/alpha and conditional ELM/cost/combined stress remain declared scenarios; completeness and production verification are separate acceptance gates. Public next-trade-date ban files require their own validated dated schema; retrieval date is not an effective date.

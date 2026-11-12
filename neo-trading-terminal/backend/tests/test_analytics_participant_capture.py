@@ -46,6 +46,22 @@ def test_official_and_imported_revisions_are_isolated(tmp_path):
     assert reports.cached(day)['provenance']=='validated-import'
 
 
+def test_official_source_outage_preserves_independent_options_evidence(tmp_path):
+    import httpx
+    market,portfolio,snapshots,store=sources(tmp_path)
+    raw=dict(context=OptionsContext().model_dump(),observed_at=datetime.now(UTC),provenance='Official report request',licence='Personal',participant_report_date=report()[0])
+    async def run():
+        with patch.object(ParticipantReports,'fetch',side_effect=httpx.ReadTimeout('private transport detail')):
+            captured=await AnalyticsCaptureService(market,store,snapshots,portfolio).capture(7,OptionsContext(),
+                ['get_nse_oi_microstructure','get_participant_fii_dii_flow'],budget=TurnBudget(),historical_input=raw)
+        assert captured.for_role('options_trading_analysis')['get_nse_oi_microstructure'].metrics['pcr_oi']==2
+        item=captured.for_role('portfolio_analysis')['get_participant_fii_dii_flow']
+        assert item.status=='UNAVAILABLE'
+        assert item.unavailable_reasons['participant_report']=='official_participant_source_unavailable_or_invalid'
+        assert 'private transport detail' not in item.model_dump_json()
+    asyncio.run(run())
+
+
 def test_six_declared_sessions_compute_changes_and_label_heuristic():
     from app.terminal.nse_participant_flow import participant_history_change
     day,csv = report()

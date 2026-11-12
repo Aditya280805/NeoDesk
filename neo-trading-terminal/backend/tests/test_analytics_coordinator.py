@@ -10,6 +10,49 @@ from app.terminal.options_snapshot import OptionsContext
 from test_analytics_capture import sources
 
 
+@pytest.mark.parametrize('route,mode,roles',[
+    ('OPTIONS','SINGLE_OPTIONS',('options_trading_analysis',)),
+    ('ANALYSIS','SINGLE_PORTFOLIO_ANALYSIS',('portfolio_analysis',)),
+    ('RISK','SINGLE_PORTFOLIO_RISK',('portfolio_risk',)),
+    ('OPTIONS_ANALYSIS','COMPOSITE_PIPELINE',('options_trading_analysis','portfolio_analysis')),
+    ('OPTIONS_RISK','COMPOSITE_PIPELINE',('options_trading_analysis','portfolio_risk')),
+    ('ANALYSIS_RISK','COMPOSITE_PIPELINE',('portfolio_analysis','portfolio_risk')),
+    ('OPTIONS_ANALYSIS_RISK','COMPOSITE_PIPELINE',('options_trading_analysis','portfolio_analysis','portfolio_risk')),
+    ('CLARIFY','CLARIFY',()),('REJECT','REJECT_MUTATION_OR_UNSUPPORTED',()),
+])
+def test_classifier_binds_canonical_roles_from_single_typed_intent(route,mode,roles):
+    from unittest.mock import patch
+    from app.terminal.analytics_coordinator import classify
+    from app.terminal.analytics_runtime import TurnBudget
+    model=SimpleNamespace(aclose=AsyncMock(),temperature=None,presence_penalty=None,frequency_penalty=None)
+    agent=SimpleNamespace(model=model,arun=AsyncMock(return_value=SimpleNamespace(content={'route':route})))
+    async def run():
+        with patch('app.terminal.analytics_coordinator.build_model',return_value=model),patch('agno.agent.Agent',return_value=agent):
+            result=await classify(SimpleNamespace(options_agent_provider='ollama'),'Untrusted fixture question',TurnBudget())
+        assert result.mode==mode and result.delegated_agents==roles
+        agent.arun.assert_awaited_once()
+        model.aclose.assert_awaited_once()
+        assert model.requests_remaining==1 and model.key_rotator is None
+        assert model.temperature==0 and model.presence_penalty==0 and model.frequency_penalty==0
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('content',[{'route':'UNKNOWN'},{'route':'OPTIONS','delegated_agents':['portfolio_risk']},{}])
+def test_classifier_rejects_unknown_or_model_supplied_roles_without_retry(content):
+    from unittest.mock import patch
+    from pydantic import ValidationError
+    from app.terminal.analytics_coordinator import classify
+    from app.terminal.analytics_runtime import TurnBudget
+    model=SimpleNamespace(aclose=AsyncMock())
+    agent=SimpleNamespace(model=model,arun=AsyncMock(return_value=SimpleNamespace(content=content)))
+    async def run():
+        with patch('app.terminal.analytics_coordinator.build_model',return_value=model),patch('agno.agent.Agent',return_value=agent),pytest.raises(ValidationError):
+            await classify(SimpleNamespace(),'Fixture',TurnBudget())
+        agent.arun.assert_awaited_once()
+        model.aclose.assert_awaited_once()
+    asyncio.run(run())
+
+
 def test_coordinator_resumes_only_pending_tools_and_replays(tmp_path):
     from app.terminal.analytics_capture import AnalyticsCaptureService
     from app.terminal.analytics_coordinator import AnalyticsCoordinator
