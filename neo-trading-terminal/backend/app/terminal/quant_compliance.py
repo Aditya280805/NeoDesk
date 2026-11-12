@@ -1,9 +1,15 @@
 """Advisory checks. Rule data must be supplied by verified server evidence."""
+from datetime import date,datetime
+from zoneinfo import ZoneInfo
+from decimal import Decimal,ROUND_HALF_UP
 
 
 def compliance_checks(positions, rules):
     if 'declared_records' in rules:
-        return declared_compliance_checks(positions,rules['declared_records'])
+        result = declared_compliance_checks(positions,rules['declared_records'])
+        if rules.get('as_of') is not None:
+            result['expiry_rule_applicability'] = expiry_rule_applicability(positions,rules['declared_records'],rules['as_of'])
+        return result
     findings = []
     def finding(code,outcome,reason,contract=None):
         findings.append(dict(code=code,outcome=outcome,reason=reason,contract_id=contract))
@@ -59,8 +65,44 @@ def declared_compliance_checks(positions,records):
             else:
                 reason = 'reduction_declared_but_account_and_intraday_coverage_unverified'
         findings.append(dict(code='mwpl',contract_id=identifier,outcome=outcome,reason=reason))
+        limit = rule.get('underlying_futeq_limit')
+        if limit is not None and rule.get('futeq_basis')=='declared_underlying_aggregate':
+            breach = current is not None and abs(current)>limit
+            findings.append(dict(code='declared_underlying_futeq_limit',contract_id=identifier,
+                outcome='breach' if breach else 'cannot_assess',
+                reason='declared_aggregate_limit_exceeded' if breach else 'aggregate_measure_or_complete_account_limit_coverage_unverified',
+                measured=current,limit=limit,basis='user_declared_underlying_aggregate'))
     for code in ('expiry_elm','calendar_spread_margin','delta_position_limit','account_aggregation','intraday_peak_exposure'):
         findings.append(dict(code=code,contract_id=None,outcome='cannot_assess',reason='verified_applicable_rule_and_complete_account_inputs_required'))
     return dict(findings=findings,risk_verdict='CANNOT_ASSESS',scenario_verdict='DECLARED_BREACH' if any(item['outcome']=='breach' for item in findings) else 'INCOMPLETE',
         rule_coverage=[{key:record[key] for key in ('contract_id','source','revision','instrument_scope','valid_from','valid_until')} for record in records],
         read_only=True,limitations=['User-declared effective-date scenarios only. Per-contract FutEq does not establish underlying-wide or complete-account compliance. No automatic kill switch or order action.'])
+
+
+def expiry_rule_applicability(positions,records,as_of):
+    """Published rule applicability under declared classification, not total margin."""
+    india = ZoneInfo('Asia/Kolkata')
+    day = datetime.fromisoformat(as_of).astimezone(india).date()
+    scopes = {record['contract_id']:record['instrument_scope'] for record in records}
+    result = []
+    for position in positions:
+        scope = scopes.get(position['contract_id'])
+        expiry = datetime.fromisoformat(position['expiry_at']).astimezone(india).date() if position.get('expiry_at') else None
+        expiring = expiry==day if expiry is not None else None
+        elm = .02 if scope=='index_derivative' and position['kind']=='option' and position['quantity']<0 and expiring and day>=date(2024,11,20) else None
+        increment = None
+        if elm is not None and position.get('spot') is not None:
+            value=Decimal(str(position['spot']))*abs(position['quantity'])*Decimal('2')
+            if value.is_finite() and 0<value<=9007199254740991:
+                increment=int(value.quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+        cutoff = date(2025,2,10) if scope=='index_derivative' else date(2026,5,4) if scope=='stock_derivative' else None
+        excluded = bool(cutoff and expiring and day>=cutoff)
+        result.append(dict(contract_id=position['contract_id'],valuation_date=day.isoformat(),expiry_date=expiry.isoformat() if expiry else None,
+            classification_basis='user_declared_unverified',additional_expiry_elm_rate=elm,total_margin_paise=None,
+            modeled_additional_expiry_elm_paise=increment,
+            modeled_elm_basis='declared_underlying_spot_times_short_economic_units_times_2pct; not_broker_margin',
+            calendar_spread_benefit_for_expiring_contract=False if excluded else None,
+            elm_rule='NCL/CMPT/64639 effective 2024-11-20',
+            calendar_rule='NCL/CMPT/66047 effective 2025-02-10' if scope=='index_derivative' else 'NCL/CMPT/72906 effective 2026-05-04' if scope=='stock_derivative' else None,
+            limitation='Declared scenario increment only; baseline/deep-OTM ELM, SPAN, eligible non-expiring pairs and broker margin are not computed. Missing or unsafe paise amounts stay unavailable.'))
+    return result

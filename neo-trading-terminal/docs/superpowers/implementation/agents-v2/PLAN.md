@@ -15,6 +15,7 @@ Baseline: codex/local-specialist-agents at 57ebe80. Main checkout is the authori
 - Single public worker; additive migrations; backward-compatible existing chat/report APIs; flags default off.
 
 ## Dependency/task checklist
+These boxes represent full phase acceptance, including source coverage, rather than kernel-only implementation. Current local implementation and exact outstanding work are recorded in COMPLETION-GAPS.md; do not use the unchecked count as an estimate of code completion.
 - [x] P0: baseline checks; strict versioned routing/evidence/proposal contracts; resume records.
 - [ ] P1 (P0): provenance/report adapters, normalized quant inputs, additive history/rule cache.
 - [ ] P2 (P0): role-bound discovery/invocation, budget enforcement, sanitation, bounded execution.

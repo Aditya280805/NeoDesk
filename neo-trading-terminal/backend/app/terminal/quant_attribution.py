@@ -8,7 +8,7 @@ RETURN_STD_FLOOR = 1e-9
 
 def portfolio_attribution(returns, *, benchmark=None, bank_benchmark=None, risk_free_annual=0.):
     names = ('sharpe','sortino','calmar','omega','ulcer_index','max_drawdown','max_drawdown_duration',
-             'beta_nifty50','beta_niftybank','win_rate','profit_factor')
+             'beta_nifty50','beta_niftybank','alpha_nifty50_annualized','alpha_niftybank_annualized','win_rate','profit_factor')
     result = dict.fromkeys(names)
     reasons = {}
     if len(returns)<30:
@@ -40,6 +40,7 @@ def portfolio_attribution(returns, *, benchmark=None, bank_benchmark=None, risk_
                 raise ValueError('Invalid aligned benchmark')
             if np.var(b,ddof=1)>RETURN_STD_FLOOR**2:
                 result[name] = float(np.cov(r,b)[0,1]/np.var(b,ddof=1))
+                result[name.replace('beta_','alpha_')+'_annualized'] = float((np.mean(excess)-result[name]*np.mean(b-risk_free_annual/252))*252)
     for name,value in result.items():
         if value is None:
             reasons[name] = 'requires_complete_trade_history' if name in ('win_rate','profit_factor') else 'missing_input_or_zero_denominator'
@@ -78,11 +79,15 @@ def declared_attribution(bundle):
     assets,trades = bundle['assets'],bundle['trades']
     cash = [asset for asset in assets if asset['kind'] in ('cash_equity','cash_etf')]
     eligible = {asset['asset_id'] for asset in cash}
-    result = dict(hrp_weights=None,sector_allocation=None,hrp_coverage={'excluded_assets':[]},unavailable_reasons={})
+    result = dict(hrp_weights=None,sector_allocation=None,cash_asset_hhi=None,cash_sector_hhi=None,cash_correlation_matrix=None,hrp_coverage={'excluded_assets':[]},unavailable_reasons={})
     if assets:
         prices = pd.DataFrame({asset['asset_id']:asset['adjusted_prices'] for asset in assets},index=bundle['dates'])
         selected = prices[[key for key in prices.columns if key in eligible]]
         variances = selected.pct_change(fill_method=None).dropna().var()
+        nondegenerate = [key for key in selected if np.isfinite(variances[key]) and variances[key]>RETURN_STD_FLOOR**2]
+        if nondegenerate:
+            result['cash_correlation_matrix'] = selected[nondegenerate].pct_change(fill_method=None).dropna().corr().to_dict()
+        result['correlation_coverage'] = dict(basis='declared_adjusted_daily_cash_price_returns',observations=max(0,len(prices)-1),excluded_assets=[key for key in prices if key not in nondegenerate])
         if len(selected.columns)>1 and (not np.all(np.isfinite(variances)) or (variances<=RETURN_STD_FLOOR**2).any()):
             hrp = dict(weights=None,reason='zero_variance_cash_returns',excluded_assets=[key for key in prices.columns if key not in eligible])
         else:
@@ -95,6 +100,8 @@ def declared_attribution(bundle):
                 key = asset['sector'] or 'UNCLASSIFIED'
                 sectors[key] = sectors.get(key,0)+asset['value_paise']/total
             result['sector_allocation'] = sectors
+            result['cash_asset_hhi'] = sum((asset['value_paise']/total)**2 for asset in cash)
+            result['cash_sector_hhi'] = sum(weight**2 for weight in sectors.values())
     if bundle['trade_history_complete'] and trades:
         profits = sum(max(0,trade['net_pnl_paise']) for trade in trades)
         losses = sum(max(0,-trade['net_pnl_paise']) for trade in trades)

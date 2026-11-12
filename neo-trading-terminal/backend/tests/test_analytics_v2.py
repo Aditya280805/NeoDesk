@@ -14,6 +14,21 @@ def test_routing_rejects_mismatched_or_duplicate_stages():
     assert RoutingDecision(mode='SINGLE_OPTIONS', delegated_agents=['options_trading_analysis']).delegated_agents == ('options_trading_analysis',)
 
 
+def test_daily_vix_zscore_does_not_use_twenty_intraday_samples():
+    from datetime import timedelta
+    from app.terminal.quant_technical import technical_regime
+    start = datetime(2026,1,1,4,tzinfo=UTC)
+    bars = [dict(time=(start+timedelta(minutes=i)).isoformat(),open=100+i,high=102+i,low=99+i,close=101+i,volume=10) for i in range(40)]
+    values = [15+i/10 for i in range(40)]
+    result = technical_regime(bars,vix_history=values)
+    assert result['metrics']['india_vix']==values[-1]
+    assert result['metrics']['vix_zscore20'] is None
+    assert result['regime']=='UNAVAILABLE'
+    assert result['unavailable_reasons']['vix_zscore20']=='daily_vix_basis_not_established'
+    daily = [{**bar,'time':(start+timedelta(days=i)).isoformat()} for i,bar in enumerate(bars)]
+    assert technical_regime(daily,vix_history=values)['metrics']['vix_zscore20'] is not None
+
+
 def test_proposals_require_verified_lot_multiples():
     from app.terminal.analytics_contracts import StrategyProposal
     data = dict(proposal_id=uuid4(), evidence_id=uuid4(), template='bull_call_spread',
@@ -131,6 +146,14 @@ def test_participant_csv_counts_are_not_delta():
     assert result['participants']['FII']['net_index_calls'] == -20
     assert result['participants']['DII']['index_futures_long_share'] is None
     assert result['unit'] == 'contracts'
+
+
+def test_rising_squeeze_regime_rule_precedes_mean_reversion():
+    from app.terminal.quant_technical import classify_regime
+    assert classify_regime(21,1,30,adx_rise_3bars=4,prior_squeeze_percentile=10)=='HIGH_VOL_BREAKOUT'
+    assert classify_regime(21,1,30,adx_rise_3bars=3,prior_squeeze_percentile=10)=='HIGH_VOL_MEAN_REVERTING'
+    assert classify_regime(21,1,30,adx_rise_3bars=4,prior_squeeze_percentile=15)=='HIGH_VOL_MEAN_REVERTING'
+    assert classify_regime(None,1,30)=='UNAVAILABLE'
 
 
 def test_regulatory_unknown_inputs_do_not_pass():

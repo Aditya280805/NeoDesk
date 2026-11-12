@@ -94,10 +94,16 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
         for key,value in metrics.items():
             if value is None:
                 reasons.setdefault(key,'required_history_input_or_assumption_unavailable')
+    if name=='get_nse_oi_microstructure' and inputs.get('cash_future_basis') is not None:
+        basis=inputs['cash_future_basis']
+        difference=basis['future_price']-basis['spot']
+        metrics['cash_future_basis']={**basis,'basis_inr':difference,'basis_fraction':difference/basis['spot'],
+            'basis':'user_declared_synchronized_cash_and_future_quotes',
+            'limitation':'Simple quoted basis; fair carry, dividend adjustment and broker identity are not verified.'}
     if observed_at is None:
         limitations.append('Source observation time is unknown; retrieval time does not verify market freshness.')
     option_tool = name in TOOLS_BY_ROLE['options_trading_analysis']
     return AnalyticsEvidence(evidence_id=identity,calculation_version=f'{name}.1',observed_at=observed_at,retrieved_at=datetime.now(UTC),
-        source_refs=tuple(source_refs),status='UNAVAILABLE' if missing else 'PARTIAL' if reasons else 'AVAILABLE',
+        source_refs=tuple(source_refs),status='UNAVAILABLE' if missing and not metrics else 'PARTIAL' if reasons else 'AVAILABLE',
         metrics=sanitize_quant_payload(metrics),unavailable_reasons=reasons,limitations=tuple(limitations),
         candidate_proposals=tuple(candidates) if option_tool else ())

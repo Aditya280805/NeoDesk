@@ -23,6 +23,16 @@ def declared():
         trade_history_complete=True,trade_period_start=dates[0],trade_period_end=now)
 
 
+def test_annualized_regression_alpha_uses_aligned_benchmark_excess_returns():
+    from app.terminal.quant_attribution import portfolio_attribution
+    benchmark=[.01,-.005,.003,-.002]*10
+    returns=[.001+1.5*value for value in benchmark]
+    metrics=portfolio_attribution(returns,benchmark=benchmark)
+    assert metrics['beta_nifty50']==pytest.approx(1.5)
+    assert metrics['alpha_nifty50_annualized']==pytest.approx(.252)
+    assert metrics['alpha_niftybank_annualized'] is None
+
+
 def test_capture_hrp_excludes_derivatives_and_keeps_independent_trade_metrics(tmp_path):
     market,portfolio,snapshots,store = sources(tmp_path)
     async def run():
@@ -34,6 +44,9 @@ def test_capture_hrp_excludes_derivatives_and_keeps_independent_trade_metrics(tm
         assert all(value>=0 for value in item.metrics['hrp_weights'].values())
         assert item.metrics['win_rate']==.5 and item.metrics['profit_factor']==3
         assert item.metrics['sector_allocation']['Banks']==.25
+        assert item.metrics['cash_asset_hhi']==pytest.approx(.625)
+        assert item.metrics['cash_correlation_matrix']['cash-a']['cash-a']==pytest.approx(1)
+        assert 'option' not in item.metrics['cash_correlation_matrix']
         assert item.metrics['sharpe'] is None
         assert 'win_rate' not in item.unavailable_reasons
         assert item.coverage['input_provenance']=='user_declared_unverified'

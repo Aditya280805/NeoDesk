@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     options_agent_stream: bool = True
     options_agent_enabled: bool = True
     analytics_tools_enabled: bool = False
+    analytics_advisory_enabled: bool = False
+    analytics_composite_enabled: bool = False
     agent_input_token_estimate_limit: int = Field(default=24000, ge=1)
     agent_context_token_limit: int = Field(default=32768, ge=1)
     options_mcp_port: int = Field(default=8766, ge=0, le=65535)

@@ -121,6 +121,51 @@ class DeclaredComplianceRule(Contract):
     ban_active: StrictBool | None = None
     base_futeq: float | None = Field(default=None,ge=-1e12,le=1e12,allow_inf_nan=False)
     current_futeq: float | None = Field(default=None,ge=-1e12,le=1e12,allow_inf_nan=False)
+    futeq_basis: Literal['per_contract','declared_underlying_aggregate'] = 'per_contract'
+    underlying_futeq_limit: float | None = Field(default=None,gt=0,le=1e12,allow_inf_nan=False)
+
+    @model_validator(mode='after')
+    def limit_basis(self):
+        if self.underlying_futeq_limit is not None and self.futeq_basis!='declared_underlying_aggregate':
+            raise ValueError('Underlying position limit requires explicitly aggregated FutEq basis')
+        return self
+
+
+class DeclaredParticipantReport(Contract):
+    report_date: date
+    csv: str = Field(min_length=1,max_length=1048576)
+
+
+class DeclaredProposalCostScenario(Contract):
+    template: Literal['bull_call_spread','bear_put_spread']
+    buy_contract_id: str = Field(min_length=1,max_length=100)
+    sell_contract_id: str = Field(min_length=1,max_length=100)
+    expiry: date
+    quantity: int = Field(strict=True,gt=0,le=1000000)
+    valued_at: AwareDatetime
+    buy_bid: Money
+    buy_ask: Money
+    sell_bid: Money
+    sell_ask: Money
+    roundtrip_cost_paise: int = Field(strict=True,ge=0,le=9007199254740991)
+    source: str = Field(min_length=1,max_length=1000)
+
+    @model_validator(mode='after')
+    def coherent(self):
+        if self.buy_contract_id==self.sell_contract_id or self.buy_bid>self.buy_ask or self.sell_bid>self.sell_ask:
+            raise ValueError('Distinct contracts and uncrossed captured quote scenario required')
+        return self
+
+
+class DeclaredCashFutureBasis(Contract):
+    underlying: str = Field(min_length=1,max_length=100)
+    future_contract_id: str = Field(min_length=1,max_length=100)
+    expiry_at: AwareDatetime
+    spot: float = Field(gt=0,le=1e12,allow_inf_nan=False)
+    future_price: float = Field(gt=0,le=1e12,allow_inf_nan=False)
+    spot_observed_at: AwareDatetime
+    future_observed_at: AwareDatetime
+    source: str = Field(min_length=1,max_length=1000)
 
 
 class HistoricalAnalyticsInput(Contract):
@@ -140,6 +185,12 @@ class HistoricalAnalyticsInput(Contract):
     risk_history: dict[str,tuple[DeclaredRiskObservation,...]] = Field(default_factory=dict,max_length=100)
     risk_history_basis: Literal['current_contract_equivalent_source_declared'] | None = None
     surface_rows: tuple[DeclaredSurfaceRow,...] = Field(default=(),max_length=500)
+    iv_history_dates: tuple[AwareDatetime,...] = Field(default=(),max_length=5000)
+    iv_history: tuple[float,...] = Field(default=(),max_length=5000)
+    iv_history_basis: Literal['constant_tenor_atm_source_declared'] | None = None
+    realized_volatility: float | None = Field(default=None,gt=0,le=10,allow_inf_nan=False)
+    realized_volatility_basis: Literal['annualized_daily_log_returns_source_declared'] | None = None
+    cash_future_basis: DeclaredCashFutureBasis | None = None
     surface_spot: float | None = Field(default=None,ge=1e-8,le=1e12,allow_inf_nan=False)
     gex_sign_assumption: Literal['calls_positive_puts_negative'] | None = None
     asset_price_dates: tuple[AwareDatetime,...] = Field(default=(),max_length=5000)
@@ -150,11 +201,43 @@ class HistoricalAnalyticsInput(Contract):
     trade_period_end: AwareDatetime | None = None
     fee_transactions: tuple[DeclaredFeeTransaction,...] = Field(default=(),max_length=200)
     compliance_rules: tuple[DeclaredComplianceRule,...] = Field(default=(),max_length=100)
+    participant_report_date: date | None = None
+    participant_csv: str | None = Field(default=None,max_length=1048576)
+    participant_history: tuple[DeclaredParticipantReport,...] = Field(default=(),max_length=6)
+    participant_sessions_complete: StrictBool = False
+    participant_price_return_5sessions: float | None = Field(default=None,ge=-1,le=1000,allow_inf_nan=False)
+    proposal_cost_scenarios: tuple[DeclaredProposalCostScenario,...] = Field(default=(),max_length=20)
 
     @model_validator(mode='after')
     def aligned(self):
-        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades and not self.fee_transactions:
+        if self.cash_future_basis is not None:
+            basis=self.cash_future_basis
+            if basis.underlying!=self.context.underlying or not 0<(basis.expiry_at-self.observed_at).total_seconds()<=3650*86400:
+                raise ValueError('Basis requires matching underlying and active future expiry')
+            if any(not 0<=(self.observed_at-time).total_seconds()<=10 for time in (basis.spot_observed_at,basis.future_observed_at)):
+                raise ValueError('Basis quotes must share the declared ten-second valuation window')
+        if self.iv_history or self.iv_history_dates or self.realized_volatility is not None:
+            if not self.surface_rows:
+                raise ValueError('Volatility history requires a declared surface')
+        if len(self.iv_history)!=len(self.iv_history_dates) or self.iv_history and self.iv_history_basis is None:
+            raise ValueError('Dated IV history and comparable tenor declaration required')
+        iv_days = [value.astimezone(ZoneInfo('Asia/Kolkata')).date() for value in self.iv_history_dates]
+        if len(iv_days)!=len(set(iv_days)) or any(a>=b for a,b in zip(self.iv_history_dates,self.iv_history_dates[1:])) or self.iv_history_dates and self.iv_history_dates[-1]>self.observed_at:
+            raise ValueError('Ordered daily nonfuture IV history required')
+        if any(not math.isfinite(value) or not 0<value<=10 for value in self.iv_history):
+            raise ValueError('Invalid historical IV fraction')
+        if self.realized_volatility is not None and self.realized_volatility_basis is None:
+            raise ValueError('Annualized realized-volatility basis required')
+        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades and not self.fee_transactions and self.participant_report_date is None and not self.proposal_cost_scenarios and self.cash_future_basis is None:
             raise ValueError('At least one historical series required')
+        if self.participant_csv is not None and self.participant_report_date is None:
+            raise ValueError('Participant CSV requires report date')
+        if self.participant_report_date is not None and self.participant_report_date>min(self.observed_at.date(),datetime.now(UTC).date()):
+            raise ValueError('Participant date after valuation/publication day')
+        if self.participant_history:
+            days = [report.report_date for report in self.participant_history]
+            if sum(len(report.csv.encode()) for report in self.participant_history)>1048576 or any(a>=b for a,b in zip(days,days[1:])) or days[-1]!=self.participant_report_date:
+                raise ValueError('Ordered bounded participant history must end at selected report')
         if len({row.transaction_id for row in self.fee_transactions})!=len(self.fee_transactions) or any(row.trade_date>self.observed_at.astimezone(ZoneInfo('Asia/Kolkata')).date() for row in self.fee_transactions):
             raise ValueError('Unique dated historical fee transactions required')
         if len({asset.asset_id for asset in self.cash_assets})!=len(self.cash_assets) or sum(len(asset.adjusted_prices) for asset in self.cash_assets)>100000:
@@ -260,6 +343,12 @@ class AnalyticsInputStore:
         if value.context != context:
             raise ValueError('Input dataset market context differs')
         inputs = {}
+        if value.proposal_cost_scenarios:
+            inputs['proposal_cost_scenarios'] = [scenario.model_dump() for scenario in value.proposal_cost_scenarios]
+        if value.participant_report_date is not None:
+            inputs['participant_report_request'] = dict(date=value.participant_report_date,csv=value.participant_csv)
+            inputs['participant_history_request'] = dict(reports=[report.model_dump() for report in value.participant_history],
+                sessions_complete=value.participant_sessions_complete,price_return=value.participant_price_return_5sessions)
         if value.fee_transactions:
             inputs['fee_transactions'] = [transaction.model_dump(mode='json') for transaction in value.fee_transactions]
         if value.cash_assets or value.closed_trades:
@@ -271,12 +360,16 @@ class AnalyticsInputStore:
         if value.surface_rows:
             inputs.update(surface_rows=[row.model_dump() for row in value.surface_rows],forward=value.surface_rows[0].forward,
                 rate=value.surface_rows[0].rate,as_of=value.observed_at,
+                surface_spot=value.surface_spot,
                 pricing_by_expiry={row.expiry_at.isoformat():dict(forward=row.forward,rate=row.rate) for row in value.surface_rows})
+            inputs.update(iv_history=list(value.iv_history),realized_volatility=value.realized_volatility)
             if value.gex_sign_assumption:
                 inputs.update(gex_rows=[{**row.model_dump(),'tau':(row.expiry_at-value.observed_at).total_seconds()/(365*86400)} for row in value.surface_rows],
                     gex_spot=value.surface_spot,gex_sign_assumption=value.gex_sign_assumption)
         if value.bars:
             inputs.update(bars=[bar.model_dump(mode='json') for bar in value.bars], vix_history=list(value.vix_history))
+        if value.cash_future_basis is not None:
+            inputs['cash_future_basis']=value.cash_future_basis.model_dump(mode='json')
         if value.cash_flow_adjusted_returns:
             inputs['verified_returns'] = list(value.cash_flow_adjusted_returns)
             if value.benchmark_returns:
@@ -286,12 +379,13 @@ class AnalyticsInputStore:
         if value.risk_positions:
             inputs['risk_positions'] = []
             for position in value.risk_positions:
-                risk_row = position.model_dump(mode='json',exclude_none=True,exclude={'expiry_at'})
+                risk_row = position.model_dump(mode='json',exclude_none=True)
                 if position.kind=='option':
                     risk_row['tau'] = max(0,(position.expiry_at-value.observed_at).total_seconds()/(365*86400))
                 inputs['risk_positions'].append(risk_row)
             if value.risk_history:
                 inputs['risk_history'] = {key:[row.model_dump(mode='json') for row in series] for key,series in value.risk_history.items()}
             if value.compliance_rules:
-                inputs['rules'] = {'declared_records':[rule.model_dump(mode='json') for rule in value.compliance_rules]}
+                inputs['rules'] = {'declared_records':[rule.model_dump(mode='json') for rule in value.compliance_rules],
+                    'as_of':value.observed_at.isoformat()}
         return inputs, f'user-import:{identity}:{row[0]}', value

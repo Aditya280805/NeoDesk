@@ -68,6 +68,7 @@ def parse_master(text, segment):
                      'source_metadata': {'source': 'kotak-scrip-master',
                                          'lLotSize': row.get('lLotSize', ''),
                                          'pInstType': row.get('pInstType', '')},
+                     'identity_source_fields': {key:row.get(key,'') for key in ('pSymbol','pSymbolName','pExchSeg','pTrdSymbol','pOptionType','lExpiryDate','pExpiryDate','dStrikePrice','pGroup','pISIN')},
                      'strike': number('dStrikePrice', 0) / 100, 'isin': row.get('pISIN', '')})
     if not rows:
         raise BrokerError(f'Kotak returned no valid instruments for {segment}.')

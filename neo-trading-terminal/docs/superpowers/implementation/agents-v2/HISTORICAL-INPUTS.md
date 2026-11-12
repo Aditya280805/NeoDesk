@@ -1,6 +1,16 @@
 # Historical analytics inputs
 
-When ANALYTICS_TOOLS_ENABLED is enabled, the options chat page exposes a composite analytics panel. Expand Optional historical inputs and supply JSON matching the selected market context. Inputs are user-declared and are not independently verified. A continuation retains the submitted question and input, even if the draft is edited. Start a new analysis to use edited inputs.
+Enable ANALYTICS_TOOLS_ENABLED and ANALYTICS_COMPOSITE_ENABLED to expose composite analytics chat. ANALYTICS_ADVISORY_ENABLED independently enables eligible hypothetical candidates. All three default off. Expand Optional historical inputs and supply JSON matching the selected market context. Inputs are user-declared and are not independently verified. Continuations retain original inputs and reject changed rollout settings.
+
+Daily VIX z-score requires one aligned VIX observation per unique ordered Indian date. Intraday aligned VIX remains displayable, but cannot establish a daily z-score or regime.
+
+Surface imports optionally accept iv_history_dates and iv_history (up to 5,000 aligned unique daily observations), with iv_history_basis="constant_tenor_atm_source_declared". At least 252 observations enable rank/percentile; comparable ATM tenor/moneyness is the source's declaration, not independently verified. Optional realized_volatility is an annualized fractional value with realized_volatility_basis="annualized_daily_log_returns_source_declared". Dates cannot follow observed_at. Missing fields leave individual metrics unavailable.
+
+Cash asset histories additionally return correlation matrices over nondegenerate daily cash returns, with excluded-asset coverage, plus asset/sector HHI over declared cash values. Derivatives do not enter these outputs. Portfolio alpha_nifty50_annualized/alpha_niftybank_annualized are the daily excess-return regression intercept multiplied by 252, using aligned benchmarks and the same risk-free basis as beta.
+
+Optional cash_future_basis contains underlying, future_contract_id, expiry_at, spot, future_price, spot_observed_at, future_observed_at and source. Both quote observations must be within ten seconds before observed_at; underlying must match context and expiry must be active. It returns simple INR/fractional quoted basis, even when chain data is unavailable. It does not verify broker identity, dividends or fair carry.
+
+Dated expiry rules also expose modeled_additional_expiry_elm_paise for declared short index options expiring on the valuation day: two percent of declared underlying spot times economic units, rounded to paise. This conditional increment is separate from total broker/SPAN margin, which remains unavailable. Missing inputs or amounts outside safe browser integer range remain unavailable.
 
 Minimal OHLCV example (more observations are needed for most indicators):
 

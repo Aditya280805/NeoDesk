@@ -40,6 +40,10 @@ def test_coordinator_resumes_only_pending_tools_and_replays(tmp_path):
             await coordinator.resume(8, key, 'other-owner', 'Explain options.', OptionsContext(), policy_revision=0)
         with pytest.raises(ValueError):
             await coordinator.resume(7, key, 'changed-policy', 'Explain options.', OptionsContext(), policy_revision=1)
+        coordinator.config.analytics_advisory_enabled=True
+        with pytest.raises(ValueError):
+            await coordinator.resume(7,key,'changed-rollout','Explain options.',OptionsContext(),policy_revision=0)
+        coordinator.config.analytics_advisory_enabled=False
         portfolio.assert_generation.side_effect = ValueError('Expired broker authentication')
         with pytest.raises(ValueError):
             await coordinator.resume(7, key, 'action-a', 'Explain options.', OptionsContext(), policy_revision=0)

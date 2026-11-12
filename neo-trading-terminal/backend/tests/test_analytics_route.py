@@ -53,3 +53,15 @@ def test_broker_failure_is_sanitized_and_releases_admission(tmp_path):
         assert reply.status_code==503
         assert 'secret-broker-token' not in reply.text
     agent.routing_limiter.leave.assert_called_once_with(7)
+
+
+def test_composite_rollout_is_independent_of_snapshot_tools(tmp_path):
+    import asyncio
+    import pytest
+    from fastapi import HTTPException
+    from app.terminal.analytics_coordinator import dispatch_analytics
+    _,agent=application(tmp_path,True)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dispatch_analytics(agent,7,SimpleNamespace()))
+    assert error.value.status_code==404
+    agent.routing_limiter.enter.assert_not_called()

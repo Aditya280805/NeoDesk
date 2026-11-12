@@ -1,5 +1,9 @@
 # Decisions and documentation
 
+- Integration 2026-11-13: separate default-off tools/advisory/composite rollout flags and bind all three into continuation identity; changing rollout invalidates resumption.
+- Source identity uses explicit documented provider neoSymbol and raw master underlying codes/terms/lots. It does not establish cash-token, settlement or exchange-time verification. Withhold expiry-day candidates without authoritative expiry-session metadata.
+- Imported IV/RV/basis/correlation/concentration/alpha and conditional ELM/cost/combined stress remain declared scenarios; completeness and production verification are separate acceptance gates. Public next-trade-date ban files require their own validated dated schema; retrieval date is not an effective date.
+
 - User approved extending existing main checkout, advisory proposals, Kotak/public data/imports, staged 30s results.
 - Keep options_model.py as LLM provider adapter; calculations use separate quant modules.
 - Preserve stronger existing risk/analysis projection boundaries.

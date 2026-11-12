@@ -1,5 +1,11 @@
 # Analytics foundation review
 
+## Integration review — 2026-11-13
+
+Fresh reviewer independently ran 26 focused integration tests and found no new authorization/execution boundary blocker. Identified VIX time-basis error: 20 intraday observations could masquerade as 20 daily observations. Regression observed failing, then fixed by withholding daily VIX z-score/regime unless aligned unique ordered Indian dates establish daily basis. Separate tests now cover mounted IV/RV history, cash correlation/HHI and independent tools/advisory/composite rollout switches. Previous source-expiry normalization and browser-safe paise findings were fixed with regressions. Account-source failure degradation was likewise demonstrated RED then GREEN.
+
+Review acceptance gaps are tracked explicitly in COMPLETION-GAPS.md. No all-phase completion claim follows from offline tests. Declared costs, cash/future basis, margin increments and supplied-position stress retain scenario provenance; complete account/broker certification is unavailable. Concurrent provider-owned edits were preserved and excluded from this analytics commit.
+
 Fresh read-only reviewer inspected da1262e and current additions. Fixed findings:
 
 1. Reject nonfinite/bool/unknown-kind stress positions before arithmetic; never turn NaN cells into zero loss.

@@ -8,7 +8,10 @@ const ts = require('typescript')
 function harness(api) {
   let cursor = 0
   const state = []
+  const listeners = new Map()
+  let effectStarted = false
   const hooks = {
+    useEffect(effect) { if (!effectStarted) { effectStarted = true; effect() } },
     useState(initial) {
       const id = cursor++
       if (!(id in state)) state[id] = initial
@@ -23,9 +26,13 @@ function harness(api) {
   const source = fs.readFileSync(path.join(__dirname, '../src/components/AnalyticsChat.tsx'), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
   const mod = { exports: {} }
-  vm.runInNewContext(`(function(require,module,exports){${compiled}\n})`, { crypto: { randomUUID: () => 'action-fixed' } })(
+  vm.runInNewContext(`(function(require,module,exports){${compiled}\n})`, { crypto: { randomUUID: () => 'action-fixed' }, window: {
+    addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name),
+  } })(
     name => name === 'react' ? hooks : name === '@/lib/api' ? { api, failure: error => error.message } : require(name), mod, mod.exports)
-  return () => { cursor = 0; return mod.exports.default({ context: { underlying: 'NIFTY', exchange: 'nse_fo', expiry: null } }) }
+  const render = () => { cursor = 0; return mod.exports.default({ context: { underlying: 'NIFTY', exchange: 'nse_fo', expiry: null } }) }
+  render.expire = () => listeners.get('neodesk:session-expired')?.()
+  return render
 }
 
 function nodes(tree, type) {
@@ -47,7 +54,7 @@ test('analytics continues with original question/import and retries the same act
   const render = harness(async (url, method, body) => {
     calls.push(body)
     if (fail) throw new Error('Connection lost')
-    return { scope: 'analytics', status: 'partial', stages: [], answer: 'Pending', continuation_id: 'saved-run' }
+    return { scope: 'analytics', read_only: true, status: 'partial', stages: [], answer: 'Pending', continuation_id: 'saved-run' }
   })
   let tree = render()
   nodes(tree, 'input')[0].props.onChange({ target: { value: 'Explain history' } })
@@ -79,4 +86,20 @@ test('invalid import JSON blocks submission before the API call', async () => {
   await settle()
   assert.equal(calls, 0)
   assert.equal(nodes(render(), 'p').find(p => p.props.role === 'alert').props.children, 'Historical input must be valid JSON.')
+})
+
+test('session expiry clears private drafts and rejects a delayed analytics reply', async () => {
+  let deliver
+  const render = harness(() => new Promise(resolve => { deliver = resolve }))
+  let tree = render()
+  nodes(tree, 'input')[0].props.onChange({ target: { value: 'Private question' } })
+  nodes(tree, 'textarea')[0].props.onChange({ target: { value: '{"provenance":"Private import"}' } })
+  nodes(render(), 'form')[0].props.onSubmit({ preventDefault() {} })
+  render.expire()
+  deliver({ scope: 'analytics', read_only: true, status: 'completed', stages: [], answer: 'Private result', continuation_id: null })
+  await settle()
+  tree = render()
+  assert.equal(nodes(tree, 'input')[0].props.value, '')
+  assert.equal(nodes(tree, 'textarea')[0].props.value, '')
+  assert.equal(nodes(tree, 'p').some(node => node.props.children === 'Private result'), false)
 })

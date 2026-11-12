@@ -1,20 +1,28 @@
-# Completion gate
+# Acceptance and release gates — 2026-11-13
 
-The implementation is not fully complete. Previous percentage estimates were informal and should not be used as acceptance evidence. Use PLAN.md and verified behavior instead.
+P0–P11 are not fully accepted. Offline tests establish the behavior below; they do not establish live data availability or model quality. No percentage estimate substitutes for this matrix.
 
-Implemented paths include role-scoped tools, budgets, deterministic calculation kernels, immutable evidence, declared technical/return/risk/surface input capture, typed proposal transport, explicit continuations and an opt-in chat UI. Missing input remains unavailable. Default live capture supports OI; imported scenarios retain unverified provenance.
+| Phase | Implemented and exercised locally | Remaining acceptance evidence/work |
+| --- | --- | --- |
+| P0 | Strict versioned contracts; durable resume records | None for foundation slice |
+| P1 | Owner-bound immutable inputs, additive cache, chain/depth/master identity, broker daily history, typed imports | Automatic authenticated adjusted asset/benchmark/IV histories, fills/cash-flow mappings and verified rule/fee/margin input adapters remain incomplete |
+| P2 | Role capabilities, isolation, two-read budgets including prefetch, deadlines, retained cancellation capacity, sanitation | Live runtime/latency checks |
+| P3 | TA-Lib indicators/regimes, session VWAP, daily-basis VIX guard, bounded history/import path | Actual historical/VIX coverage; one 180-calendar-day batch may not support EMA200 |
+| P4 | Black76/IV/Greeks, expiry-specific forward/rate inputs, surfaces, mounted dated IV history/RV | Automatic authoritative pricing/IV-history/actual-expiry sourcing and live fixtures |
+| P5 | OI/PCR/walls/pain/buildup with provided previous OI/price, GEX proxy, declared synchronized cash/future basis, participant acquisition/history | Automatic prior-OI/cash-futures basis/complete participant-session and cash-flow histories |
+| P6 | Server candidates inside existing payloads; no third MCP call; gross payoff, statutory fees, bound conditional costs | Complete dated broker/exchange/closing/exercise schedules, contract-note reconciliation, settlement/exchange timestamp proof |
+| P7 | Ratios, beta/alpha, cash HRP/correlations/HHI, declared trades and sector allocation | Authenticated adjusted cash/trade/cash-flow adapters and sector performance attribution remain incomplete |
+| P8 | Risk-only derived account report, dated lot/ban/FutEq scenarios, ELM/calendar applicability and conditional ELM increment, supplied-position post-proposal stress | Official dated ban/MWPL acquisition, verified account-wide/intraday FutEq/limits, complete calendar/SPAN/broker margin and complete-account aggregation remain incomplete |
+| P9 | 28-cell repricing; per-series/per-horizon tails; independent 95% >=250 and 99% >=1000 availability | Verified representative production history/input coverage |
+| P10 | Classifier, ordered stages, typed handoff, evidence rendering, fenced/idempotent two-resume continuation | Live router/model quality evaluation; offline replay checks contracts only |
+| P11 | Responsive opt-in UI, evidence/missing inputs, session fences, independent default-off flags, CI definitions, docs, synthetic browser checks | Remote CI, Docker on available host, live smoke validation and release approval |
 
-Remaining acceptance gaps:
+Internal work is distinct from external validation: adapters/calculations explicitly named above remain implementation work. Missing-data behavior and declared scenarios are not verified production coverage.
 
-| Area | Required completion evidence |
-| --- | --- |
-| Verified proposals | Canonical underlying identity, contract-specific verified lot/expiry metadata, exchange-time proof and forward/rate sources. Matched token bid/ask enrichment is now wired into opt-in analytics, with contradictory quote-token rejection tests; catalogue matching still does not establish verified identity or proposal eligibility. |
-| Live regulatory checks | Applicable dated SEBI/exchange rules, instrument classification, published ban/MWPL inputs and verified margin/position-limit bases; complete-account and post-proposal combination tests. Current conservative checks are incomplete. |
-| Fee/payoff coverage | Verified exchange/broker schedules and aggregation policy, quote/expiry context and dated source revisions. Statutory arithmetic exists; unknown fee components are unavailable. |
-| Attribution/HRP | Eligible cash-asset adjusted histories, complete trade/sector mappings, cash-flow adjustments and an authenticated source adapter. Imported return ratios work; complete attribution does not. |
-| Live source proof | Explicit authenticated broker smoke checks and saved sanitized representative response fixtures. Offline fixtures do not establish production data availability. |
-| Release gate | Dedicated UI visual verification, complete final branch review and deployment checks. Remote CI and Docker execution have not been established on this host. |
+Source probe: the official NSE page links `https://nsearchives.nseindia.com/content/fo/fo_secban.csv` for the next trade date. A bounded public HTTPS probe on this host timed out. Its current schema/effective trading date has not been validated; do not infer a date from download time or invent a header/parser to claim complete ban coverage. A dated representative publication is needed for that adapter.
 
-Relevant local evidence: backend/app/terminal/options_readiness.py get_data_capabilities and legacy_chain_to_evidence. That inventory explicitly marks contract_identity and lot_size_expiry unverified, exchange_timestamp and IV missing, and margin/account_pnl basis unverified. Do not promote client declarations or parser defaults to verification flags.
+Live credentials are a separate gate. AGENTS.md requires explicit live evaluation authorization; no broker/model credentials were used here. Obtain read-only broker/model smoke authorization plus sanitized representative source fixtures and authoritative dated schedules before completing those paths. Never place orders or enable execution.
 
-Several gaps above still require internal adapter and calculation work. The approved plan separately requires explicit authorization before live credential use. Live source validation needs read-only broker smoke authorization, plus an authoritative dated fee/rule data source or validated imports. Do not place orders, enable execution, or publish/deploy while resolving these gaps.
+Default rollout: ANALYTICS_TOOLS_ENABLED=false, ANALYTICS_ADVISORY_ENABLED=false, ANALYTICS_COMPOSITE_ENABLED=false. Tools enable snapshots; advisory additionally enables eligible hypothetical candidates; composite additionally enables unified analytics chat/UI.
+
+Official references: [NCL expiry ELM](https://nsearchives.nseindia.com/content/circulars/CMPT64639.pdf), [index calendar rule](https://nsearchives.nseindia.com/content/circulars/CMPT66047.pdf), [NSE ban publication](https://www.nseindia.com/static/products-services/equity-derivatives-risk-management-sec-ban). Declared applicability/increments do not establish complete margin coverage.

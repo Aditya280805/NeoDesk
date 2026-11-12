@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC,datetime,timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -13,10 +14,11 @@ from test_analytics_capture import sources
 
 def declared():
     now = datetime.now(UTC)
+    day = now.astimezone(ZoneInfo('Asia/Kolkata')).date()
     return dict(context=OptionsContext().model_dump(),provenance='Declared compliance scenario',licence='Personal use',observed_at=now,
         risk_positions=[dict(contract_id='future',underlying='NIFTY',kind='future',quantity=26,spot=100)],
         compliance_rules=[dict(contract_id='future',source='Declared dated exchange rule scenario',revision='scenario.1',
-            instrument_scope='stock_derivative',valid_from=(now-timedelta(days=1)).date(),valid_until=now.date(),lot_size=25,ban_active=True,base_futeq=100,current_futeq=-50)])
+            instrument_scope='stock_derivative',valid_from=day-timedelta(days=1),valid_until=day,lot_size=25,ban_active=True,base_futeq=100,current_futeq=-50)])
 
 
 def test_dated_compliance_scenario_detects_lot_and_sign_flip_without_healthy_verdict(tmp_path):
@@ -78,3 +80,44 @@ def test_api_reduction_stays_incomplete_and_index_scope_does_not_apply_stock_ban
         metrics = request(raw)
         assert metrics['scenario_verdict']=='INCOMPLETE'
         assert not any(finding['outcome']=='breach' for finding in metrics['findings'])
+
+
+def test_expiry_rule_effective_dates_and_no_fabricated_margin():
+    from app.terminal.quant_compliance import expiry_rule_applicability
+    def check(day,scope,kind='option',quantity=-25):
+        return expiry_rule_applicability([dict(contract_id='id',kind=kind,quantity=quantity,expiry_at=f'{day}T15:30:00+05:30')],
+            [dict(contract_id='id',instrument_scope=scope)],f'{day}T10:00:00+05:30')[0]
+    assert check('2024-11-19','index_derivative')['additional_expiry_elm_rate'] is None
+    assert check('2024-11-20','index_derivative')['additional_expiry_elm_rate']==.02
+    assert check('2024-11-20','index_derivative',quantity=25)['additional_expiry_elm_rate'] is None
+    assert check('2025-02-09','index_derivative')['calendar_spread_benefit_for_expiring_contract'] is None
+    assert check('2025-02-10','index_derivative')['calendar_spread_benefit_for_expiring_contract'] is False
+    assert check('2026-05-03','stock_derivative')['calendar_spread_benefit_for_expiring_contract'] is None
+    row = check('2026-05-04','stock_derivative',kind='future')
+    assert row['calendar_spread_benefit_for_expiring_contract'] is False
+    assert row['total_margin_paise'] is None
+
+
+def test_declared_expiry_elm_increment_is_separate_from_total_margin():
+    from app.terminal.quant_compliance import expiry_rule_applicability
+    def scenario(spot,quantity=-25):
+        return expiry_rule_applicability([dict(contract_id='id',kind='option',quantity=quantity,spot=spot,expiry_at='2026-11-13T15:30:00+05:30')],
+            [dict(contract_id='id',instrument_scope='index_derivative')],'2026-11-13T10:00:00+05:30')[0]
+    row=scenario(100)
+    assert row['modeled_additional_expiry_elm_paise']==5000
+    assert row['total_margin_paise'] is None
+    assert scenario(100,25)['modeled_additional_expiry_elm_paise'] is None
+    assert scenario(1e12,-1000000)['modeled_additional_expiry_elm_paise'] is None
+
+
+def test_position_limit_uses_explicit_aggregate_basis_and_never_certifies_account():
+    from app.terminal.quant_compliance import compliance_checks
+    raw = declared()
+    raw['compliance_rules'][0].update(ban_active=False,current_futeq=100,underlying_futeq_limit=80)
+    with pytest.raises(ValidationError): HistoricalAnalyticsInput.model_validate(raw)
+    raw['compliance_rules'][0]['futeq_basis']='declared_underlying_aggregate'
+    value = HistoricalAnalyticsInput.model_validate(raw)
+    result = compliance_checks([position.model_dump(mode='json') for position in value.risk_positions],
+        {'declared_records':[rule.model_dump(mode='json') for rule in value.compliance_rules]})
+    assert any(item['code']=='declared_underlying_futeq_limit' and item['outcome']=='breach' for item in result['findings'])
+    assert result['risk_verdict']=='CANNOT_ASSESS'

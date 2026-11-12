@@ -51,7 +51,8 @@ class OptionsAgent:
             from .analytics_runtime import BoundedWork
             from .analytics_store import AnalyticsStore
             self.analytics_capture = AnalyticsCaptureService(market,AnalyticsStore(store.path),self.mcp.snapshots,
-                portfolio_service,work=BoundedWork(pending=self.mcp.pending),catalogue=store)
+                portfolio_service,work=BoundedWork(pending=self.mcp.pending),catalogue=store,risk_policy_reader=self.risk_store.get_policy,
+                advisory_enabled=getattr(config,'analytics_advisory_enabled',False))
         with store.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS option_chat_conversations (
@@ -72,6 +73,8 @@ class OptionsAgent:
         provider = provider_settings(self.config)
         return {'configured': provider.configured and self.mcp.ready, 'model_configured': provider.configured,
                 'analytics_tools_enabled': bool(getattr(self.config,'analytics_tools_enabled',False)),
+                'analytics_composite_enabled': bool(getattr(self.config,'analytics_tools_enabled',False) and getattr(self.config,'analytics_composite_enabled',False)),
+                'analytics_advisory_enabled': bool(getattr(self.config,'analytics_tools_enabled',False) and getattr(self.config,'analytics_advisory_enabled',False)),
                 'mcp_ready': self.mcp.ready, 'enabled': self.config.options_agent_enabled,
                 'provider': provider.provider, 'api_key_env': provider.key_name,
                 'setup_error': provider.error,

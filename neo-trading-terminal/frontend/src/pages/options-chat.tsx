@@ -30,6 +30,7 @@ type RiskSnapshot = {
 }
 type AgentStatus = {
   analytics_tools_enabled?: boolean
+  analytics_composite_enabled?: boolean
   configured: boolean
   model_configured: boolean
   mcp_ready: boolean
@@ -683,7 +684,7 @@ export default function OptionsChat() {
 
     {effectiveScope === 'risk' && <PortfolioRiskSettings onRevision={setPolicyRevision} />}
 
-    {status?.analytics_tools_enabled && <AnalyticsChat key={JSON.stringify(context)} context={context} />}
+    {status?.analytics_tools_enabled && status?.analytics_composite_enabled && <AnalyticsChat key={JSON.stringify(context)} context={context} />}
 
     <div className="options-chat-layout">
       <section className="panel options-conversation" aria-label="Options conversation">

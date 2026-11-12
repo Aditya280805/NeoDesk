@@ -55,6 +55,12 @@ def spread_payoff(proposal,quotes,*,roundtrip_cost_paise=None):
     breakeven = buy.strike+debit if buy.option_type=='CALL' else buy.strike-debit
     if roundtrip_cost_paise is not None and (type(roundtrip_cost_paise) is not int or roundtrip_cost_paise<0):
         raise ValueError('Verified nonnegative paise costs required')
+    exact_limit = 9007199254740991
+    amounts = [profit,loss]
+    if roundtrip_cost_paise is not None:
+        amounts.extend((profit-roundtrip_cost_paise,loss+roundtrip_cost_paise))
+    if any(abs(amount)>exact_limit for amount in amounts):
+        raise ValueError('Payoff exceeds exact browser paise range')
     return dict(gross_max_profit_paise=profit,gross_max_loss_paise=loss,gross_breakeven=str(breakeven),
                 net_max_profit_paise=profit-roundtrip_cost_paise if roundtrip_cost_paise is not None else None,
                 net_max_loss_paise=loss+roundtrip_cost_paise if roundtrip_cost_paise is not None else None,

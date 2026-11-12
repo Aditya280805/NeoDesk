@@ -45,6 +45,18 @@ def test_projection_keeps_role_isolation_and_does_not_claim_post_trade_risk():
     assert len(new_items)==1 and not risk.candidate_proposals
 
 
+def test_payoff_rejects_unsafe_browser_paise_magnitudes():
+    from app.terminal.quant_proposals import spread_payoff
+    from app.terminal.analytics_contracts import StrategyProposal
+    _,_,proposal = fixture()
+    value = proposal.model_dump(mode='json')
+    for index,leg in enumerate(value['legs']):
+        leg.update(strike=str(1000000000000+index*1000000000000),quantity=100000,lot_size=100000)
+    large = StrategyProposal.model_validate(value)
+    with pytest.raises(ValueError,match='exact browser paise'):
+        spread_payoff(large,{leg.contract_id:dict(bid='1',ask='1.01') for leg in large.legs})
+
+
 def test_coordinator_persists_selection_and_projects_without_extra_tool_call(tmp_path):
     import asyncio
     from dataclasses import replace

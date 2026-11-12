@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { api, failure } from '@/lib/api'
 
 type Context = { underlying: string; exchange: string; expiry: string | null }
@@ -8,10 +8,20 @@ type Stage = {
   claims: { evidence_id: string; path: (string | number)[]; value: unknown }[]
 }
 type Result = {
+  read_only: true
   scope: 'analytics'; status: string; answer: string; stages: Stage[]
   continuation_id: string | null; continuations_exhausted?: boolean
   selected_proposal?: { proposal_id: string; template: string; legs: { side: string; contract_id: string; quantity: number }[] } | null
   pending?: { role: string; tools: string[] }[]
+}
+
+function evidenceSummary(value: unknown) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const reasons = record.unavailable_reasons
+  return { status: typeof record.status === 'string' ? record.status : 'Coverage unknown',
+    missing: typeof reasons === 'object' && reasons !== null && !Array.isArray(reasons)
+      ? Object.entries(reasons).filter((entry): entry is [string, string] => typeof entry[1] === 'string') : [] }
 }
 
 export default function AnalyticsChat({ context }: { context: Context }) {
@@ -24,12 +34,37 @@ export default function AnalyticsChat({ context }: { context: Context }) {
   const requestQuestion = useRef('')
   const [historicalInput, setHistoricalInput] = useState('')
   const requestInput = useRef<unknown>(null)
+  const revision = useRef(0)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    const expired = () => {
+      revision.current += 1
+      inFlight.current = false
+      action.current = null
+      requestQuestion.current = ''
+      requestInput.current = null
+      setQuestion('')
+      setHistoricalInput('')
+      setResult(null)
+      setBusy(false)
+      setError('')
+    }
+    window.addEventListener('neodesk:session-expired', expired)
+    return () => {
+      mounted.current = false
+      revision.current += 1
+      window.removeEventListener('neodesk:session-expired', expired)
+    }
+  }, [])
 
   async function run(resume: boolean) {
     if (inFlight.current || (!resume && !question.trim())) return
     inFlight.current = true
     setBusy(true)
     setError('')
+    const version = revision.current
     if (!resume) {
       try {
         requestInput.current = historicalInput.trim() ? JSON.parse(historicalInput) : null
@@ -49,18 +84,21 @@ export default function AnalyticsChat({ context }: { context: Context }) {
         ...(requestInput.current ? { historical_input: requestInput.current } : {}),
         ...(resume ? { continuation_id: result?.continuation_id, continuation_action_id: action.current } : {}),
       })
-      if (reply.scope !== 'analytics' || !Array.isArray(reply.stages)) throw new Error('Unexpected analytics response.')
+      if (!mounted.current || version !== revision.current) return
+      if (reply.scope !== 'analytics' || reply.read_only !== true || !Array.isArray(reply.stages)) throw new Error('Unexpected analytics response.')
       setResult(reply)
       action.current = null
     } catch (error) {
-      setError(failure(error))
+      if (mounted.current && version === revision.current) setError(failure(error))
     } finally {
-      inFlight.current = false
-      setBusy(false)
+      if (mounted.current && version === revision.current) {
+        inFlight.current = false
+        setBusy(false)
+      }
     }
   }
 
-  return <section className="panel" aria-label="Composite analytics">
+  return <section className="panel analytics-panel" aria-label="Composite analytics">
     <h2>Composite analytics</h2>
     <p>Ask across options, portfolio analysis and risk. Each section shows its evidence and missing inputs.</p>
     <form onSubmit={(event: FormEvent) => { event.preventDefault(); void run(false) }}>
@@ -91,7 +129,15 @@ export default function AnalyticsChat({ context }: { context: Context }) {
         <dl>{stage.claims.map((claim, index) => <div key={index}>
           <dt>{claim.path.join(' → ')}</dt><dd>{String(claim.value ?? 'Unavailable')} · evidence {claim.evidence_id}</dd>
         </div>)}</dl>
-        <details><summary>Evidence, coverage and proposal candidates</summary><pre>{JSON.stringify(stage.evidence, null, 2)}</pre></details>
+        {Object.entries(stage.evidence).map(([name, value]) => {
+          const info = evidenceSummary(value)
+          return info && <div className="analytics-evidence-summary" key={name}>
+            <strong>{name.replaceAll('_', ' ')} · {info.status}</strong>
+            {info.missing.length > 0 && <ul>{info.missing.slice(0, 8).map(([field, reason]) => <li key={field}>{field}: {reason}</li>)}</ul>}
+            {info.missing.length > 8 && <small>{info.missing.length - 8} more coverage notes in the evidence details.</small>}
+          </div>
+        })}
+        <details><summary>Evidence, coverage and proposal candidates</summary><pre tabIndex={0} aria-label="Captured analytics evidence JSON">{JSON.stringify(stage.evidence, null, 2)}</pre></details>
       </article>)}
       {!result.stages.length && <p>{result.answer}</p>}
       {result.pending?.map(task => <p key={task.role}>Pending: {task.role.replaceAll('_', ' ')} — {task.tools.join(', ')}</p>)}
