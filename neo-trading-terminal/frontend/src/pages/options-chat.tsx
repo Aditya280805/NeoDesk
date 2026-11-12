@@ -8,6 +8,7 @@ import type { PortfolioSnapshot } from '@/lib/portfolioEvidence'
 import { PortfolioRiskEnvelope, RiskReport, canPublish } from '@/lib/portfolioRisk'
 import PortfolioRiskPanel from '@/components/PortfolioRiskPanel'
 import PortfolioRiskSettings from '@/components/PortfolioRiskSettings'
+import AnalyticsChat from '@/components/AnalyticsChat'
 
 type ChatMode = 'chain' | 'portfolio' | 'risk' | 'auto'
 type ConcreteScope = 'chain' | 'portfolio' | 'risk'
@@ -28,6 +29,7 @@ type RiskSnapshot = {
   risk_report?: RiskReport
 }
 type AgentStatus = {
+  analytics_tools_enabled?: boolean
   configured: boolean
   model_configured: boolean
   mcp_ready: boolean
@@ -680,6 +682,8 @@ export default function OptionsChat() {
     </section>
 
     {effectiveScope === 'risk' && <PortfolioRiskSettings onRevision={setPolicyRevision} />}
+
+    {status?.analytics_tools_enabled && <AnalyticsChat key={JSON.stringify(context)} context={context} />}
 
     <div className="options-chat-layout">
       <section className="panel options-conversation" aria-label="Options conversation">

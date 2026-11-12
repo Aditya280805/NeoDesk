@@ -27,6 +27,9 @@ class UnifiedChatRequest(BaseModel):
     conversation_id: UUID | None = None
     report_kind: Literal['strategy', 'scan', 'alert', 'backtest'] | None = None
     report_id: UUID | None = None
+    analytics_mode: bool = False
+    continuation_id: UUID | None = None
+    continuation_action_id: UUID | None = None
 
     @field_validator('message')
     @classmethod
@@ -191,6 +194,13 @@ def _record_parent_run(service, user_id, run_id, status, started, detail):
 
 
 async def dispatch_unified(service, user_id, body):
+    if (body.continuation_id is not None or body.continuation_action_id is not None) and not body.analytics_mode:
+        raise HTTPException(422, 'Continuations require analytics mode.')
+    if body.analytics_mode:
+        if body.report_kind is not None or body.report_id is not None or body.conversation_id is not None:
+            raise HTTPException(422, 'Start analytics with a market context and no legacy conversation or report.')
+        from .analytics_coordinator import dispatch_analytics
+        return await dispatch_analytics(service, user_id, body)
     if body.report_kind is not None or body.report_id is not None:
         if body.report_kind is None or body.report_id is None:
             raise HTTPException(422, 'Select both a saved report kind and report ID.')

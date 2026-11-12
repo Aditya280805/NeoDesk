@@ -39,7 +39,7 @@ class Continuations:
             if payload['binding'] != binding:
                 raise ValueError('Evidence context changed; start a fresh run')
             if action_id in payload['replays']:
-                return dict(replay=payload['replays'][action_id])
+                return dict(replay=payload['replays'][action_id], state=payload['state'])
             if payload['lease'] and payload['lease']['until']>self.clock():
                 raise ValueError('Continuation already running')
             if payload['attempts']>=2:
