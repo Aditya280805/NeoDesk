@@ -29,6 +29,7 @@ data/*.sqlite3-*
 .test-runs/
 .pytest-tmp-debug/
 .next/
+.next-*-backup-*/
 
 # Temporary and reference repositories
 gsd-temp/
