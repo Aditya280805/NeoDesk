@@ -26,3 +26,8 @@ def test_ledger_import_owner_isolation_and_summary_projection(tmp_path):
     assert inputs['ledger_summary']['net_external_flow_paise']==10000
     assert 'ledger_csv' not in inputs
     with pytest.raises(ValueError): store.load(8,saved['dataset_id'],context)
+    assert store.list_owned(8)==[]
+    assert not store.delete_owned(8,saved['dataset_id'])
+    assert store.delete_owned(7,saved['dataset_id'])
+    assert store.list_owned(7)==[]
+    with pytest.raises(ValueError): store.load(7,saved['dataset_id'],context)

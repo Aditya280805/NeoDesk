@@ -2,6 +2,8 @@
 
 Ledger upload is optional in Analytics chat > Optional historical inputs. Market, option and current-position analyses do not require a ledger. The file is submitted only with the next question and retained in that authenticated owner's private historical-input dataset; raw CSV is not projected into specialist evidence. Session expiry clears the browser draft. Imported amounts remain user-declared, not broker-verified.
 
+Use Show saved imports to list your latest100 historical-input datasets, then Delete import to remove the original saved dataset after confirmation. Another account cannot list or delete it. Previously generated reports can retain derived summaries; deleting an import is not deletion of conversation/report history. API: GET /api/options-agent/imports and DELETE /api/options-agent/imports/{dataset_id}, authenticated individual owners only. Missing and other-owner datasets both return404.
+
 Supported initial format: UTF-8 CSV, at most1MiB/10,000 transactions, exactly these columns in order:
 
 ```csv

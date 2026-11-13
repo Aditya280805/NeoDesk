@@ -15,6 +15,8 @@ def get_user_id(request):
 
 
 options_agent_router = APIRouter(prefix='/api/options-agent')
+from .analytics_imports import router as analytics_imports_router
+options_agent_router.include_router(analytics_imports_router)
 
 
 @options_agent_router.post('/unified-chat')

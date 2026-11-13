@@ -33,6 +33,7 @@ export default function AnalyticsChat({ context }: { context: Context }) {
   const action = useRef<string | null>(null)
   const requestQuestion = useRef('')
   const [historicalInput, setHistoricalInput] = useState('')
+  const [savedImports, setSavedImports] = useState<{ dataset_id: string }[]>([])
   const requestInput = useRef<unknown>(null)
   const revision = useRef(0)
   const mounted = useRef(true)
@@ -47,6 +48,7 @@ export default function AnalyticsChat({ context }: { context: Context }) {
       requestInput.current = null
       setQuestion('')
       setHistoricalInput('')
+      setSavedImports([])
       setResult(null)
       setBusy(false)
       setError('')
@@ -107,6 +109,25 @@ export default function AnalyticsChat({ context }: { context: Context }) {
         <input value={question} maxLength={2000} disabled={busy} onChange={event => setQuestion(event.target.value)} />
       </label>
       <details><summary>Optional historical inputs</summary>
+        <button type="button" disabled={busy} onClick={async () => {
+          const expectedRevision = revision.current
+          try {
+            const response = await api<{ items: { dataset_id: string }[] }>('/options-agent/imports')
+            if (mounted.current && expectedRevision === revision.current) setSavedImports(response.items)
+          } catch (error) { if (expectedRevision === revision.current) setError(failure(error)) }
+        }}>Show saved imports</button>
+        <p>Delete removes the original saved import. Previously generated reports may retain derived summaries.</p>
+        {savedImports.map(item => <div key={item.dataset_id}>
+          <span>Import {item.dataset_id.slice(0, 8)}</span>
+          <button type="button" disabled={busy} onClick={async () => {
+            if (!window.confirm('Permanently delete this saved import? Derived reports are retained.')) return
+            const expectedRevision = revision.current
+            try {
+              await api(`/options-agent/imports/${item.dataset_id}`, 'DELETE')
+              if (mounted.current && expectedRevision === revision.current) setSavedImports(items => items.filter(row => row.dataset_id !== item.dataset_id))
+            } catch (error) { if (expectedRevision === revision.current) setError(failure(error)) }
+          }}>Delete import</button>
+        </div>)}
         <label>Optional ledger CSV (up to 1 MiB)
           <input type="file" accept=".csv,text/csv" disabled={busy} onChange={async event => {
             const file = event.target.files?.[0]

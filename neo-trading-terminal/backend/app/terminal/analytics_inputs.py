@@ -343,6 +343,18 @@ class AnalyticsInputStore:
             db.execute('INSERT INTO analytics_inputs VALUES (?,?,?,?)', (identity, owner, checksum, encoded))
         return dict(dataset_id=identity, checksum=checksum, provenance=value.provenance, live_verification='unverified')
 
+    def list_owned(self,owner):
+        if type(owner) is not int or owner<=0: raise ValueError('Authenticated owner required')
+        with self.store.connect() as db:
+            rows=db.execute('SELECT id FROM analytics_inputs WHERE owner=? ORDER BY rowid DESC LIMIT 100',(owner,)).fetchall()
+        return [dict(dataset_id=row[0]) for row in rows]
+
+    def delete_owned(self,owner,identity):
+        if type(owner) is not int or owner<=0: raise ValueError('Authenticated owner required')
+        identity=str(UUID(str(identity)))
+        with self.store.connect() as db:
+            return db.execute('DELETE FROM analytics_inputs WHERE owner=? AND id=?',(owner,identity)).rowcount==1
+
     def load(self, owner, identity, context):
         if type(owner) is not int or owner <= 0:
             raise ValueError('Authenticated owner required')
