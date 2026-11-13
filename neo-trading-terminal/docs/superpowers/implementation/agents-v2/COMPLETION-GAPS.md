@@ -2,6 +2,17 @@
 
 P0–P11 are not fully accepted. Offline tests establish the behavior below; they do not establish live data availability or model quality. No percentage estimate substitutes for this matrix.
 
+## Latest verified status (supersedes older source/runtime statements below)
+
+- Live reported defects resolved: all six holdings have catalogue links and P&L; holdings totals/invested/funds display; positions/orders correctly empty. Options agent successfully answered in the signed-in website.
+- Official dated ban fetch, five-minute exact-date cache, risk evidence mounting and raw-master stock-contract mapping are implemented. Unknown empty-day publication format remains unsupported.
+- Authenticated current-day fill acquisition and declared-position risk evaluator wiring are implemented. They do not establish historical cash-ledger or complete-account coverage.
+- Optional owner-scoped ledger CSV import, explicit column/date/unit/type mapping, summary projection and saved-import list/deletion are implemented. Separate debit/credit layouts, statement preambles and Excel/PDF are unsupported.
+- Ledger absence limits dependent performance metrics only; it does not block other agent tools.
+- Full backend878 passed before the last cash-expiry regression; final expiry change separately passed40 focused tests. Frontend92 tests/lint/build passed at the last frontend change. Real-model analytics synthetic-source smoke passed four claims/one MCP read; this is distinct from real broker acceptance.
+
+Actual unfinished implementation: authoritative adjusted-price/corporate-action and long IV-history acquisition; complete historical account ledger/fill coverage and reconciliation; source-backed complete account/intraday FutEq, limits and margin inputs; whole-account proposal assessment using complete verified inventory and per-contract marks; remaining unsupported import layouts. Data-source selection/access and representative schemas are prerequisites, not calculations to invent. Remote CI/host-specific Docker/release checks remain external acceptance gates. Existing concurrent provider/frontend edits must be reviewed before any combined GitHub release.
+
 | Phase | Implemented and exercised locally | Remaining acceptance evidence/work |
 | --- | --- | --- |
 | P0 | Strict versioned contracts; durable resume records | None for foundation slice |
