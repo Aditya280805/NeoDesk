@@ -21,6 +21,41 @@ def sources(tmp_path):
     return market,portfolio,snapshots,store
 
 
+def test_compliance_capture_includes_official_publication_without_account_verdict(tmp_path,monkeypatch):
+    from app.terminal.analytics_capture import AnalyticsCaptureService
+    from app.terminal import analytics_ban_source
+    report = {'trade_date':'2026-11-13','symbols':['KAYNES'],'checksum':'a'*64,
+              'source':analytics_ban_source.SOURCE_URL,'complete_account_coverage':False}
+    monkeypatch.setattr(analytics_ban_source,'fetch_ban_publication',lambda *a,**kw:report)
+    market,portfolio,snapshots,store = sources(tmp_path)
+    async def scenario():
+        captured = await AnalyticsCaptureService(market,store,snapshots,portfolio,catalogue=Mock()).capture(
+            7,OptionsContext(),['check_sebi_and_mwpl_compliance'],budget=TurnBudget())
+        item = captured.for_role('portfolio_risk')['check_sebi_and_mwpl_compliance']
+        assert item.metrics['official_ban_publication']['symbols'] == ['KAYNES']
+        assert item.status == 'PARTIAL'
+        assert 'risk_positions' in item.unavailable_reasons
+        assert not captured.for_role('portfolio_analysis')
+    asyncio.run(scenario())
+
+
+def test_ban_source_outage_keeps_capture_with_explicit_missing_source(tmp_path,monkeypatch):
+    import httpx
+    from app.terminal.analytics_capture import AnalyticsCaptureService
+    from app.terminal import analytics_ban_source
+    def unavailable(*args,**kwargs):
+        raise httpx.ReadTimeout('private transport message')
+    monkeypatch.setattr(analytics_ban_source,'fetch_ban_publication',unavailable)
+    market,portfolio,snapshots,store = sources(tmp_path)
+    async def scenario():
+        captured = await AnalyticsCaptureService(market,store,snapshots,portfolio,catalogue=Mock()).capture(
+            7,OptionsContext(),['check_sebi_and_mwpl_compliance'],budget=TurnBudget())
+        item = captured.for_role('portfolio_risk')['check_sebi_and_mwpl_compliance']
+        assert item.unavailable_reasons['official_ban_publication'] == 'official_dated_ban_publication_unavailable'
+        assert 'private transport message' not in item.model_dump_json()
+    asyncio.run(scenario())
+
+
 def test_capture_collects_off_loop_once_and_persists_owner_evidence(tmp_path):
     from app.terminal.analytics_capture import AnalyticsCaptureService
     market,portfolio,snapshots,store = sources(tmp_path)

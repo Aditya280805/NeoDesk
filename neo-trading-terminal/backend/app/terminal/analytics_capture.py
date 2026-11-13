@@ -95,6 +95,7 @@ class AnalyticsCaptureService:
         account_report = None
         account_reason = None
         participant_reason = None
+        ban_publication, ban_reason = None, None
         account_refs = ()
         quote_depth = None
         depth_reason = None
@@ -224,11 +225,28 @@ class AnalyticsCaptureService:
         # Do not reconstruct Greeks, return history, margins or verified contract
         # identities from the chain's LTP-only rows. Their source adapters must
         # supply those inputs explicitly in a future capture extension.
+        if self.catalogue is not None and 'check_sebi_and_mwpl_compliance' in names:
+            import httpx
+            from zoneinfo import ZoneInfo
+            from .analytics_ban_source import fetch_ban_publication
+            check(generation)
+            try:
+                ban_publication = fetch_ban_publication(datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date(),deadline=deadline)
+            except (httpx.HTTPError,ValueError):
+                ban_reason = 'official_dated_ban_publication_unavailable'
+            check(generation)
         result = {}
         for name in names:
             check(generation)
             item_refs = (*refs,*account_refs) if name in TOOLS_BY_ROLE['portfolio_risk'] else tuple(refs)
             item = calculate_evidence(name,inputs,source_refs=item_refs,observed_at=observed_at)
+            if name == 'check_sebi_and_mwpl_compliance':
+                if ban_publication is not None:
+                    item = item.model_copy(update={'metrics':{**item.metrics,'official_ban_publication':ban_publication},
+                        'status':'PARTIAL','source_refs':(*item.source_refs,ban_publication['source']+'#sha256='+ban_publication['checksum']),
+                        'limitations':(*item.limitations,'Published symbol list only; contract mapping, complete account exposure and intraday monitoring remain unverified.')})
+                elif ban_reason is not None:
+                    item = item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'official_ban_publication':ban_reason}})
             if name=='get_participant_fii_dii_flow' and participant_reason is not None:
                 item=item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'participant_report':participant_reason}})
             if name=='get_technical_regime_snapshot' and history_source is not None:
