@@ -11,7 +11,7 @@ export function clearLegacyAuthToken(): void {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public code?: string) {
+  constructor(message: string, public status: number, public code?: string, public runId?: string) {
     super(message)
     this.name = 'ApiError'
   }
@@ -37,7 +37,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
     const detail = data?.detail
     const message = typeof detail === 'string' ? detail
       : typeof detail?.message === 'string' ? detail.message : `Request failed (${response.status})`
-    throw new ApiError(message, response.status, typeof detail?.code === 'string' ? detail.code : undefined)
+    throw new ApiError(message, response.status, typeof detail?.code === 'string' ? detail.code : response.headers?.get('X-Options-Error-Code') || undefined, response.headers?.get('X-Options-Run-Id') || undefined)
   }
   return data as T
 }

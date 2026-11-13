@@ -382,7 +382,7 @@ class OptionsMCP:
         if scope == 'chain' and not isinstance(context, OptionsContext):
             raise ValueError('Chain requires selected context')
         capability = Capability(user_id, context.model_copy(deep=True) if context is not None else None,
-            run_id, time.monotonic() + 65, scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
+            run_id, (deadline_monotonic + 5 if deadline_monotonic is not None else time.monotonic() + 65), scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
             deadline_monotonic=deadline_monotonic if deadline_monotonic is not None else time.monotonic()+60)
         capability.harness = harness
         if analytics_evidence is not None:

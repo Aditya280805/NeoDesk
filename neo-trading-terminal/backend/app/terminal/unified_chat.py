@@ -284,7 +284,8 @@ async def dispatch_unified(service, user_id, body):
     parent_run_id = str(uuid4())
     input_limit = getattr(service.config, 'agent_input_token_estimate_limit', 24000) if hasattr(service, 'config') and service.config else 24000
     context_limit = getattr(service.config, 'agent_context_token_limit', 32768) if hasattr(service, 'config') and service.config else 32768
-    harness = RequestHarness(auto=True, input_limit=input_limit, context_limit=context_limit)
+    harness = RequestHarness(auto=True, input_limit=input_limit, context_limit=context_limit,
+        deadline=started + getattr(getattr(service, 'config', None), 'agent_request_timeout_seconds', 85))
     harness.admission_owner = (service, user_id) if limiter else None
     harness.delegations = 0
     parent_detail = {

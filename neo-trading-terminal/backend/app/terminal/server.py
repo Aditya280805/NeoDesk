@@ -118,6 +118,8 @@ def create_app(config: Settings):
         async with AsyncExitStack() as stack:
             if config.options_agent_enabled:
                 await stack.enter_async_context(app.state.options_agent.mcp.lifespan())
+                if config.environment != 'test':
+                    await app.state.options_agent.check_llm_health()
             await app.state.options_monitoring_service.start()
             await app.state.options_scanner_service.start()
             await app.state.options_backtest_service.start()

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     ollama_api_key: SecretStr = SecretStr('ollama')
     ollama_reasoning_effort: Literal['none', 'low', 'medium', 'high'] | None = 'none'
     ollama_timeout_seconds: int = Field(default=90, ge=5, le=600)
+    agent_request_timeout_seconds: int = Field(default=110, ge=5, le=110)
     options_agent_stream: bool = True
     options_agent_enabled: bool = True
     analytics_tools_enabled: bool = False

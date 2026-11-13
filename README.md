@@ -10,6 +10,30 @@
 
 A multi-user Indian financial market trading terminal, active trader workstation, and derivatives intelligence platform. NeoDesk unites live NSE/BSE market data, order routing via Kotak Neo, simulated paper portfolios with strict user isolation, an institutional-grade options analytics engine, and an AI chat assistant powered by the Model Context Protocol (MCP) and Agno.
 
+## Current release state
+
+The checked-in implementation runs locally with SQLite and an optional Kotak Neo session; MongoDB and Docker are not required for the default development path. Analytics and agent features are read-only by design: they inspect scoped market/account evidence and produce advisory reports, but cannot place orders.
+
+Account-history inputs are explicit and privacy-preserving. Users may optionally upload a bounded CSV cash ledger and map its columns (including debit/credit layouts); imports are normalized, owner-scoped, and deletable. Without a ledger, market and portfolio views still work, while return and cash-flow reconciliation remains unavailable instead of being guessed. Excel/PDF statements, arbitrary broker layouts, automatic corporate-action factors, long implied-volatility history, and complete whole-account margin certification require an authoritative source or normalized export and are not fabricated by the application.
+
+The repository includes bounded specialist-agent contracts, evidence-bound citations, portfolio-risk evaluation, continuation/cancellation fencing, live portfolio confirmation, and frontend progress/error handling. Provider flags default to safe local/offline behavior; cloud model credentials are optional and must be supplied through environment variables.
+
+### System design at a glance
+
+```mermaid
+flowchart LR
+    Browser[Next.js workstation and chat] --> API[FastAPI gateway]
+    API --> Scope[Owner/session/capability fences]
+    Scope --> Services[Market, portfolio, risk, analytics]
+    Services --> Store[(SQLite WAL, owner-scoped records)]
+    Services --> Broker[Kotak Neo adapter]
+    Scope --> MCP[Loopback FastMCP read-only tools]
+    MCP --> Agent[Bounded specialist agents]
+    Agent --> MCP
+```
+
+Every specialist response is tied to captured evidence for the requesting owner and session. Secret-bearing broker payloads stay server-side, proposal templates are selected from server-provided tool results, and unavailable data is represented explicitly rather than inferred.
+
 ---
 
 ## 🏛️ Comprehensive System Design & Architecture

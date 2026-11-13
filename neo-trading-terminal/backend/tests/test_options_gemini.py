@@ -16,7 +16,7 @@ from test_options_agent import chain
 
 def test_gemini_key_alone_selects_gemini_and_never_uses_openai(tmp_path):
     from app.terminal.options_model import provider_settings
-    config = Settings(_env_file=None, data_dir=tmp_path, gemini_api_key=SecretStr('gemini-fixture'))
+    config = Settings(_env_file=None, data_dir=tmp_path, options_agent_provider='auto', gemini_api_key=SecretStr('gemini-fixture'))
     provider = provider_settings(config)
     assert provider.provider == 'gemini'
     assert provider.model == 'gemini-3.8-flash'
@@ -34,15 +34,15 @@ def test_explicit_provider_never_falls_back_to_other_paid_provider():
 
 def test_auto_prefers_gemini_when_both_keys_exist_and_openai_still_works():
     from app.terminal.options_model import provider_settings
-    both = Settings(_env_file=None, gemini_api_key=SecretStr('google-fixture'), openai_api_key=SecretStr('openai-fixture'))
+    both = Settings(_env_file=None, options_agent_provider='auto', gemini_api_key=SecretStr('google-fixture'), openai_api_key=SecretStr('openai-fixture'))
     assert provider_settings(both).provider == 'gemini'
-    old = Settings(_env_file=None, openai_api_key=SecretStr('openai-fixture'))
+    old = Settings(_env_file=None, options_agent_provider='auto', openai_api_key=SecretStr('openai-fixture'))
     assert provider_settings(old).model == 'gpt-4.1-mini'
 
 
 def test_incompatible_model_is_actionable_configuration_error():
     from app.terminal.options_model import provider_settings
-    config = Settings(_env_file=None, gemini_api_key=SecretStr('google-fixture'), options_agent_model='gpt-4.1-mini')
+    config = Settings(_env_file=None, options_agent_provider='auto', gemini_api_key=SecretStr('google-fixture'), options_agent_model='gpt-4.1-mini')
     provider = provider_settings(config)
     assert not provider.configured
     assert 'OPTIONS_AGENT_MODEL' in provider.error
@@ -159,7 +159,7 @@ def test_real_gemini_agent_mcp_cycle_without_external_network(tmp_path, monkeypa
         httpx_async_client=httpx.AsyncClient(transport=httpx.MockTransport(send))))
     monkeypatch.setattr('app.terminal.options_gemini.BoundedGemini.get_client', lambda self: sdk)
     app = create_app(Settings(_env_file=None, data_dir=tmp_path, environment='test',
-        gemini_api_key=SecretStr('gemini-fixture'), options_mcp_port=0))
+        options_agent_provider='gemini', gemini_api_key=SecretStr('gemini-fixture'), options_mcp_port=0))
     monkeypatch.setattr(app.state.market, 'call', lambda *args, **kwargs: chain())
     _clear_rate_limits()
     with TestClient(app, headers={'X-NeoDesk':'1'}) as client:

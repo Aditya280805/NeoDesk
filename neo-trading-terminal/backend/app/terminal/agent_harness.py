@@ -136,10 +136,10 @@ def harness_context(harness, stage):
         current_harness.reset(token)
 
 
-async def bounded_invoke(invoke, generation_limit, *args, reasoning=False, **kwargs):
+def _prepare_bounded_invocation(invoke, generation_limit, args, kwargs):
     active = current_harness.get()
     if active is None:
-        return await invoke(*args, **kwargs)
+        return None
     harness, stage = active
     request = {name: kwargs[name] for name in ('messages', 'tools', 'response_format', 'tool_choice') if name in kwargs}
     if args:
@@ -158,6 +158,22 @@ async def bounded_invoke(invoke, generation_limit, *args, reasoning=False, **kwa
             value = getattr(owner, name, None)
             if isinstance(value, int):
                 setattr(owner, name, min(value, ticket[1]))
+    return harness, ticket
+
+
+def _account_bounded_usage(harness, ticket, usage, *, reasoning=False):
+    spent = getattr(usage, 'output_tokens', None)
+    if reasoning:
+        thoughts = getattr(usage, 'reasoning_tokens', None)
+        spent = None if spent is None or thoughts is None else spent + thoughts
+    harness.account(ticket, spent)
+
+
+async def bounded_invoke(invoke, generation_limit, *args, reasoning=False, **kwargs):
+    prepared = _prepare_bounded_invocation(invoke, generation_limit, args, kwargs)
+    if prepared is None:
+        return await invoke(*args, **kwargs)
+    harness, ticket = prepared
     started = time.monotonic()
     try:
         async with asyncio.timeout(harness.check_deadline()):
@@ -174,10 +190,37 @@ async def bounded_invoke(invoke, generation_limit, *args, reasoning=False, **kwa
         raise
     finally:
         ticket[0].duration_ms += (time.monotonic()-started)*1000
-    usage = getattr(response, 'response_usage', None)
-    spent = getattr(usage, 'output_tokens', None)
-    if reasoning:
-        thoughts = getattr(usage, 'reasoning_tokens', None)
-        spent = None if spent is None or thoughts is None else spent + thoughts
-    harness.account(ticket, spent)
+    _account_bounded_usage(harness, ticket, getattr(response, 'response_usage', None), reasoning=reasoning)
     return response
+
+
+async def bounded_stream(invoke_stream, generation_limit, *args, reasoning=False, **kwargs):
+    prepared = _prepare_bounded_invocation(invoke_stream, generation_limit, args, kwargs)
+    if prepared is None:
+        async for delta in invoke_stream(*args, **kwargs):
+            yield delta
+        return
+    harness, ticket = prepared
+    started = time.monotonic()
+    final_usage = None
+    completed = False
+    try:
+        async with asyncio.timeout(harness.check_deadline()):
+            async for delta in invoke_stream(*args, **kwargs):
+                usage = getattr(delta, 'response_usage', None)
+                if usage is not None:
+                    final_usage = usage
+                yield delta
+        completed = True
+    except TimeoutError:
+        harness.account(ticket, None)
+        raise HarnessError('timeout') from None
+    except BaseException as error:
+        from agno.exceptions import ModelProviderError
+        rejected = isinstance(error, ModelProviderError) and error.status_code == 429
+        harness.account(ticket, 0 if rejected else None)
+        raise
+    finally:
+        ticket[0].duration_ms += (time.monotonic()-started)*1000
+    if completed:
+        _account_bounded_usage(harness, ticket, final_usage, reasoning=reasoning)
