@@ -61,12 +61,19 @@ def run_evaluations(dataset_path: Path, dry_run: bool = False) -> dict:
     started = time.monotonic()
 
     for case in cases:
-        # Replay routing decision logic
+        actual = None
+        if not dry_run:
+            import asyncio
+            from app.core.config import settings
+            from app.terminal.analytics_coordinator import classify
+            actual = asyncio.run(classify(settings,case['question'],TurnBudget()))
+        passed = actual is not None and actual.mode==case['mode'] and actual.delegated_agents==case['roles']
         results.append({
             "id": case["id"],
             "expected_mode": case["mode"],
             "expected_roles": case["roles"],
-            "status": "PASS",
+            "status": "PASS" if passed else "FIXTURE_ONLY" if dry_run else "FAIL",
+            "actual_mode": actual.mode if actual else None,
         })
 
     return {
@@ -75,7 +82,7 @@ def run_evaluations(dataset_path: Path, dry_run: bool = False) -> dict:
         "source": "independent_heldout_corpus",
         "dataset": dataset_path.name,
         "total_cases": len(cases),
-        "passed_cases": len(results),
+        "passed_cases": sum(row['status']=='PASS' for row in results),
         "elapsed_seconds": round(time.monotonic() - started, 4),
         "results": results,
     }
@@ -100,7 +107,7 @@ def main():
         args.output.write_text(out_text, encoding="utf-8")
 
     print(out_text)
-    return 0
+    return 0 if args.dry_run or report['passed_cases']==report['total_cases'] else 1
 
 
 if __name__ == "__main__":

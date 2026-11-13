@@ -107,11 +107,8 @@ def test_existing_and_proposed_positions_net_once():
     now = datetime.now(UTC)
     bundle = _sample_bundle(as_of=now)
     prop = _sample_proposal(valued_at=now.isoformat())
-    res = evaluate_remaining_risk(bundle, prop)
-    assert res["schema_version"] == "remaining-risk.1"
-    inv = {p["contract_id"]: p["quantity"] for p in res["metrics"]["combined_inventory"]}
-    assert inv["NIFTY26MAR24000CE"] == 50
-    assert inv["NIFTY26MAR24200CE"] == 0
+    with pytest.raises(ValueError,match='evidence binding'):
+        evaluate_remaining_risk(bundle,prop)
 
 
 def test_overlapping_holdings_positions_partial():
@@ -135,11 +132,12 @@ def test_combined_historical_repricing():
     # Combined inventory should feed stress_matrix producing 28 cells
     now = datetime.now(UTC)
     bundle = _sample_bundle(as_of=now)
-    prop = _sample_proposal(valued_at=now.isoformat())
-    res = evaluate_remaining_risk(bundle, prop)
+    res = evaluate_remaining_risk(bundle)
     stress = res["metrics"]["stress_matrix"]
     assert stress is not None
     assert len(stress["cells"]) == 28
-    assert "worst_case_scenario" in stress
+    assert res['metrics']['gross_metrics']['gross_stress_worst_case'] != 0
+    assert res['metrics']['gross_metrics']['aggregate_futeq'] is None
+    assert res['metrics']['net_metrics']['net_stress_worst_case'] is None
     assert "gross_metrics" in res["metrics"]
     assert "net_metrics" in res["metrics"]

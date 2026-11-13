@@ -76,6 +76,9 @@ def statutory_charges(product, side, turnover_inr, trade_date, *, brokerage_inr=
     if side in ('EXERCISE', 'ASSIGNMENT'):
         # For exercise, exchange and sebi are not charged, only STT, brokerage, exercise charge, GST
         req_components = [result[k] for k in ('stt_paise', 'stamp_paise', 'brokerage_paise', 'gst_paise')]
+        if exercise_charge is None:
+            result['gst_paise'] = None
+            req_components.append(None)
     if all(x is not None for x in req_components):
         total = sum(req_components)
         if result['slippage_paise'] is not None:

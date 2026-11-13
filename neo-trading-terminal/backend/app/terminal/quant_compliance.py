@@ -51,8 +51,8 @@ def aggregate_underlying_compliance(positions, records):
         if scope != 'stock_derivative':
             continue
         ban_active = any(r.get('ban_active') is True for _, r in pairs)
-        has_base = any(r.get('base_futeq') is not None for _, r in pairs)
-        has_curr = any(r.get('current_futeq') is not None for _, r in pairs)
+        has_base = all(r.get('base_futeq') is not None and r.get('futeq_basis','per_contract')=='per_contract' for _, r in pairs)
+        has_curr = all(r.get('current_futeq') is not None and r.get('futeq_basis','per_contract')=='per_contract' for _, r in pairs)
 
         base_futeq = sum(r.get('base_futeq') or 0 for _, r in pairs) if has_base else None
         current_futeq = sum(r.get('current_futeq') or 0 for _, r in pairs) if has_curr else None

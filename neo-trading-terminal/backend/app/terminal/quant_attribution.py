@@ -30,7 +30,9 @@ def cash_flow_adjusted_returns(daily_values, cash_flows):
 def reconcile_trade_inventory_cash(initial_cash_inr, fills):
     """Reconcile realized trade PnL, execution fills, fee deductions, and ending cash."""
     initial = float(initial_cash_inr)
-    if initial < 0:
+    if len({fill.get('contract_id') for fill in fills})>1:
+        raise ValueError('Separate per-contract opening inventory required')
+    if not np.isfinite(initial) or initial < 0:
         raise ValueError("Initial cash cannot be negative")
 
     gross_pnl = 0.0
@@ -42,8 +44,14 @@ def reconcile_trade_inventory_cash(initial_cash_inr, fills):
     inventory_qty = 0
 
     for fill in fills:
+        if fill.get('fees_paise') is None:
+            raise ValueError('Complete explicit fees required')
+        if type(fill.get('quantity')) is not int or fill['quantity']<=0 or type(fill['fees_paise']) is not int or fill['fees_paise']<0:
+            raise ValueError('Positive integer quantities and nonnegative paise fees required')
         qty = int(fill["quantity"])
         price = float(fill["price"])
+        if isinstance(fill['price'],bool) or not np.isfinite(price) or price<=0:
+            raise ValueError('Positive finite fill price required')
         side = fill["side"]
         fees = float(fill.get("fees_paise", 0)) / 100.0
         total_fees += fees
@@ -54,6 +62,8 @@ def reconcile_trade_inventory_cash(initial_cash_inr, fills):
             inventory_qty += qty
             inventory_cost += trade_val
         elif side == "SELL":
+            if qty>inventory_qty:
+                raise ValueError('Verified opening inventory required for sale')
             cash_delta += (trade_val - fees)
             # Realize PnL against inventory cost average
             if inventory_qty > 0:
@@ -61,8 +71,8 @@ def reconcile_trade_inventory_cash(initial_cash_inr, fills):
                 gross_pnl += (trade_val - cost_basis)
                 inventory_qty -= qty
                 inventory_cost -= cost_basis
-            else:
-                gross_pnl += trade_val
+        else:
+            raise ValueError('Unknown fill side')
 
     net_pnl = gross_pnl - total_fees
     ending_cash = initial + cash_delta
@@ -166,13 +176,7 @@ def hrp_weights(adjusted_prices, *, eligible_assets):
         from pypfopt import HRPOpt
         weights = dict(HRPOpt(returns=returns).optimize())
     except ImportError:
-        # Pure numpy HRP fallback (López de Prado inverse-variance clustering)
-        cov = returns.cov().to_numpy()
-        cols = list(returns.columns)
-        n = len(cols)
-        inv_var = 1.0 / np.maximum(np.diag(cov), RETURN_STD_FLOOR**2)
-        w = inv_var / np.sum(inv_var)
-        weights = {cols[i]: float(w[i]) for i in range(n)}
+        return dict(weights=None,reason='hrp_dependency_unavailable',excluded_assets=excluded)
     if any(not np.isfinite(w) or w < 0 for w in weights.values()) or abs(sum(weights.values()) - 1) > 1e-6:
         raise ValueError('Invalid HRP output')
     return dict(weights=weights, excluded_assets=excluded, method='long-only-cash-hrp.1')
