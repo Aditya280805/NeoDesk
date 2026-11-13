@@ -1,4 +1,4 @@
-"""Strict single-batch daily history acquisition; never repairs malformed OHLC."""
+"""Bounded daily history acquisition; never repairs malformed OHLC."""
 from datetime import UTC,datetime,timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,15 +27,27 @@ def technical_history(market,catalogue,user,context,deadline,validate):
     if len(matches)!=1:
         return None
     end = datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date()-timedelta(days=1)
-    start = end-timedelta(days=179)
-    validate()
-    raw = market.call('historical_data',user_id=user,neosymbol=matches[0]['id'],interval='D',
-        from_date=start.isoformat(),to_date=end.isoformat(),deadline_monotonic=deadline)
-    validate()
-    try:
-        return parse_daily_history(raw,start,end,matches[0]['id'])
-    except (ValueError,TypeError,KeyError,AttributeError):
-        raise HistorySourceUnavailable('Historical source fields are missing or invalid') from None
+    final_end, combined = end, []
+    for _ in range(3):
+        start = end-timedelta(days=179)
+        validate()
+        raw = market.call('historical_data',user_id=user,neosymbol=matches[0]['id'],interval='D',
+            from_date=start.isoformat(),to_date=end.isoformat(),deadline_monotonic=deadline)
+        validate()
+        try:
+            # An explicitly empty older window establishes no additional history.
+            if combined and isinstance(raw,dict) and raw.get('interval','D') == 'D' and raw.get('data') == {'candles':[]}:
+                break
+            parsed = parse_daily_history(raw,start,end,matches[0]['id'])
+        except (ValueError,TypeError,KeyError,AttributeError):
+            raise HistorySourceUnavailable('Historical source fields are missing or invalid') from None
+        combined = parsed['bars'] + combined
+        if len(combined) >= 200:
+            break
+        end = start-timedelta(days=1)
+    return dict(bars=combined,last_observation=datetime.fromisoformat(combined[-1]['time']),
+        source_reference=f'kotak-history:{matches[0]["id"]}:D:{start}:{final_end}',
+        limitations=['At most three nonoverlapping 180-calendar-day batches under the shared deadline; long lookbacks may remain unavailable. Closed historical bars are not current exchange quotes. Adjustments are not independently verified.'])
 
 
 def parse_daily_history(raw,start,end,instrument_id):
