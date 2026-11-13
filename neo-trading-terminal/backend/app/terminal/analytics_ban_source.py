@@ -4,6 +4,7 @@ import io
 import re
 import hashlib
 import time
+import json
 from datetime import UTC, date, datetime
 from contextlib import nullcontext
 
@@ -12,6 +13,34 @@ import httpx
 SOURCE_URL = 'https://nsearchives.nseindia.com/content/fo/fo_secban.csv'
 MONTHS = {name:index for index,name in enumerate(
     ('JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'),1)}
+
+
+class BanReports:
+    """Separate official namespace; bounded reuse with immutable revisions."""
+    def __init__(self,store):
+        self.store = store
+
+    def fetch(self,trade_date,*,deadline):
+        def check():
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Ban publication acquisition deadline exhausted')
+        check()
+        with self.store.connect() as db:
+            row = db.execute('SELECT payload FROM analytics_source_revisions WHERE source=? AND report_date=? ORDER BY retrieved_at DESC LIMIT 1',
+                ('nse-ban-official',trade_date.isoformat())).fetchone()
+        check()
+        if row:
+            cached = json.loads(row[0])
+            age = (datetime.now(UTC)-datetime.fromisoformat(cached['retrieved_at'])).total_seconds()
+            if 0 <= age < 300 and cached.get('trade_date') == trade_date.isoformat() and cached.get('source') == SOURCE_URL and cached.get('provenance') == 'official_https_fetch':
+                return cached
+        result = fetch_ban_publication(trade_date,deadline=deadline)
+        check()
+        with self.store.connect() as db:
+            db.execute('INSERT INTO analytics_source_revisions VALUES (?,?,?,?,?) ON CONFLICT(source,report_date,checksum) DO UPDATE SET retrieved_at=excluded.retrieved_at,payload=excluded.payload',
+                ('nse-ban-official',trade_date.isoformat(),result['checksum'],result['retrieved_at'],json.dumps(result,allow_nan=False)))
+        check()
+        return result
 
 
 def fetch_ban_publication(expected_trade_date: date, *, deadline: float, client=None) -> dict:

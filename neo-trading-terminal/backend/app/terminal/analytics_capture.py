@@ -228,10 +228,10 @@ class AnalyticsCaptureService:
         if self.catalogue is not None and 'check_sebi_and_mwpl_compliance' in names:
             import httpx
             from zoneinfo import ZoneInfo
-            from .analytics_ban_source import fetch_ban_publication
+            from .analytics_ban_source import BanReports
             check(generation)
             try:
-                ban_publication = fetch_ban_publication(datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date(),deadline=deadline)
+                ban_publication = BanReports(self.store).fetch(datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date(),deadline=deadline)
             except (httpx.HTTPError,ValueError):
                 ban_reason = 'official_dated_ban_publication_unavailable'
             check(generation)

@@ -25,7 +25,8 @@ def test_compliance_capture_includes_official_publication_without_account_verdic
     from app.terminal.analytics_capture import AnalyticsCaptureService
     from app.terminal import analytics_ban_source
     report = {'trade_date':'2026-11-13','symbols':['KAYNES'],'checksum':'a'*64,
-              'source':analytics_ban_source.SOURCE_URL,'complete_account_coverage':False}
+              'source':analytics_ban_source.SOURCE_URL,'complete_account_coverage':False,
+              'retrieved_at':'2026-11-13T00:00:00+00:00','provenance':'official_https_fetch'}
     monkeypatch.setattr(analytics_ban_source,'fetch_ban_publication',lambda *a,**kw:report)
     market,portfolio,snapshots,store = sources(tmp_path)
     async def scenario():

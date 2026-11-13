@@ -25,6 +25,8 @@ The user's next after the explicit read-only smoke request authorized scoped liv
 
 ## Next work
 
+Official ban cache now mounted in production capture: separate nse-ban-official namespace, exact trade-date key, five-minute reuse, deadline checks before/after SQLite, and refresh of retrieval metadata for unchanged checksums. Captured evidence remains immutable.166 analytics/quant regressions passed; after correcting same-checksum refresh,20 focused source/capture tests passed including stale refresh/reuse. Contract mapping and remaining phase gaps remain open. No server restart, so the signed-in session is preserved and new code awaits restart.
+
 Latest risk integration verification:165 analytics/quant tests passed,651 deselected in28.79s, including official source mounting and sanitized outage behavior. Prior full812-test run predates this integration; no full816-test claim. Resume at source cache/verified contract-symbol mapping and unresolved authenticated portfolio diagnostics.
 
 Current risk integration: production capture with a catalogue now fetches the official publication only when the compliance tool is requested. Publication/date/checksum is appended only to that risk tool, with explicit missing-source handling on HTTP/validation failure and session/deadline rechecks. Required account/contract inputs are not invented or replaced; report-only evidence stays PARTIAL. Captured publication is retained in immutable evidence, but a reusable source cache, contract mapping, empty-day formats and complete-account compliance remain open. Backend remains running on earlier code until restart. Verification: focused18 passed before adding the outage regression; broader analytics/quant run underway.
