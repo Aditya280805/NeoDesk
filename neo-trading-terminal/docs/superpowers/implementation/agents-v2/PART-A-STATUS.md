@@ -1,5 +1,7 @@
 # Part A resume
 
+Backend restarted at user's explicit request with backend/logging-local.json enabling the allowlisted market diagnostics; health endpoint verified. Broker sign-in must be renewed. Inspect logs/restart-local.stderr.log only for portfolio_source_shape entries after refresh; never print unrelated raw SDK messages. Initial launch referenced the config before it existed and exited; config was added and successful launch then verified.
+
 Plan: ../../plans/2026-11-13-remaining-part-a-sources.md
 Baseline ca806c1. Main checkout codex/local-specialist-agents; preserve concurrent provider edits.
 
