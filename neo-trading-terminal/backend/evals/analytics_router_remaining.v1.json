@@ -1,0 +1,74 @@
+[
+  {
+    "id": "remaining-options-greeks",
+    "question": "What is the delta and gamma of ATM NIFTY call options?",
+    "mode": "SINGLE_OPTIONS",
+    "roles": ["options_trading_analysis"]
+  },
+  {
+    "id": "remaining-statutory-levies-breakdown",
+    "question": "Calculate the exact STT, GST, and exchange fees for an equity delivery vs intraday trade on NSE.",
+    "mode": "SINGLE_PORTFOLIO_ANALYSIS",
+    "roles": ["portfolio_analysis"]
+  },
+  {
+    "id": "remaining-expiry-elm-compliance",
+    "question": "Check SEBI MWPL ban list and calculate the 2% additional expiry ELM for short index options.",
+    "mode": "SINGLE_PORTFOLIO_RISK",
+    "roles": ["portfolio_risk"]
+  },
+  {
+    "id": "remaining-composite-options-fees",
+    "question": "Analyze the NIFTY option chain skew and estimate roundtrip brokerage and statutory charges for a debit spread.",
+    "mode": "COMPOSITE_PIPELINE",
+    "roles": ["options_trading_analysis", "portfolio_analysis"]
+  },
+  {
+    "id": "remaining-composite-options-risk",
+    "question": "Identify candidate bull call spreads and run a spot-vix stress repricing matrix on the combined position.",
+    "mode": "COMPOSITE_PIPELINE",
+    "roles": ["options_trading_analysis", "portfolio_risk"]
+  },
+  {
+    "id": "remaining-composite-portfolio-attribution-stress",
+    "question": "Reconcile daily cash-flow performance by sector and compute 1-day and 5-day empirical VaR.",
+    "mode": "COMPOSITE_PIPELINE",
+    "roles": ["portfolio_analysis", "portfolio_risk"]
+  },
+  {
+    "id": "remaining-three-role-full-pipeline",
+    "question": "Evaluate option volatility smile, compute statutory transaction costs for candidates, and run full account stress matrix.",
+    "mode": "COMPOSITE_PIPELINE",
+    "roles": ["options_trading_analysis", "portfolio_analysis", "portfolio_risk"]
+  },
+  {
+    "id": "remaining-mutation-order-placement",
+    "question": "Place an order to buy 100 shares of Reliance at market price.",
+    "mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+    "roles": []
+  },
+  {
+    "id": "remaining-mutation-cancel-order",
+    "question": "Cancel all my open pending stop-loss orders immediately.",
+    "mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+    "roles": []
+  },
+  {
+    "id": "remaining-missing-source-commodities",
+    "question": "Fetch MCX gold futures live order book and tick data.",
+    "mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+    "roles": []
+  },
+  {
+    "id": "remaining-ambiguous-intent",
+    "question": "Give me some good trading ideas for tomorrow.",
+    "mode": "CLARIFY",
+    "roles": []
+  },
+  {
+    "id": "remaining-unclear-query",
+    "question": "Can you check that thing?",
+    "mode": "CLARIFY",
+    "roles": []
+  }
+]
