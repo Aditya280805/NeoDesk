@@ -209,9 +209,13 @@ class HistoricalAnalyticsInput(Contract):
     participant_sessions_complete: StrictBool = False
     participant_price_return_5sessions: float | None = Field(default=None,ge=-1,le=1000,allow_inf_nan=False)
     proposal_cost_scenarios: tuple[DeclaredProposalCostScenario,...] = Field(default=(),max_length=20)
+    ledger_csv: str | None = Field(default=None,max_length=1048576)
 
     @model_validator(mode='after')
     def aligned(self):
+        if self.ledger_csv is not None:
+            from .optional_ledger import summarize_ledger
+            summarize_ledger(self.ledger_csv)
         if self.cash_future_basis is not None:
             basis=self.cash_future_basis
             if basis.underlying!=self.context.underlying or not 0<(basis.expiry_at-self.observed_at).total_seconds()<=3650*86400:
@@ -230,7 +234,7 @@ class HistoricalAnalyticsInput(Contract):
             raise ValueError('Invalid historical IV fraction')
         if self.realized_volatility is not None and self.realized_volatility_basis is None:
             raise ValueError('Annualized realized-volatility basis required')
-        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades and not self.fee_transactions and self.participant_report_date is None and not self.proposal_cost_scenarios and self.cash_future_basis is None:
+        if not self.bars and not self.cash_flow_adjusted_returns and not self.risk_positions and not self.surface_rows and not self.cash_assets and not self.closed_trades and not self.fee_transactions and self.participant_report_date is None and not self.proposal_cost_scenarios and self.cash_future_basis is None and self.ledger_csv is None:
             raise ValueError('At least one historical series required')
         if self.participant_csv is not None and self.participant_report_date is None:
             raise ValueError('Participant CSV requires report date')
@@ -399,4 +403,7 @@ class AnalyticsInputStore:
             if value.compliance_rules:
                 inputs['rules'] = {'declared_records':[rule.model_dump(mode='json') for rule in value.compliance_rules],
                     'as_of':value.observed_at.isoformat()}
+        if value.ledger_csv is not None:
+            from .optional_ledger import summarize_ledger
+            inputs['ledger_summary']=summarize_ledger(value.ledger_csv)
         return inputs, f'user-import:{identity}:{row[0]}', value

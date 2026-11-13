@@ -94,6 +94,9 @@ def calculate_evidence(name, inputs, *, source_refs, observed_at, candidates=(),
         for key,value in metrics.items():
             if value is None:
                 reasons.setdefault(key,'required_history_input_or_assumption_unavailable')
+    if name=='get_portfolio_attribution_and_rebalance' and inputs.get('ledger_summary') is not None:
+        metrics['optional_ledger']=inputs['ledger_summary']
+        reasons['performance_return']='aligned_valuations_and_complete_cash_flow_coverage_required'
     if name=='get_nse_oi_microstructure' and inputs.get('cash_future_basis') is not None:
         basis=inputs['cash_future_basis']
         difference=basis['future_price']-basis['spot']

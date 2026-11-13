@@ -101,11 +101,33 @@ export default function AnalyticsChat({ context }: { context: Context }) {
   return <section className="panel analytics-panel" aria-label="Composite analytics">
     <h2>Composite analytics</h2>
     <p>Ask across options, portfolio analysis and risk. Each section shows its evidence and missing inputs.</p>
+    <p>A ledger is optional. Use market and current-position analysis without uploading one. Cash-flow performance needs additional account history and valuations.</p>
     <form onSubmit={(event: FormEvent) => { event.preventDefault(); void run(false) }}>
       <label>Analytics question
         <input value={question} maxLength={2000} disabled={busy} onChange={event => setQuestion(event.target.value)} />
       </label>
       <details><summary>Optional historical inputs</summary>
+        <label>Optional ledger CSV (up to 1 MiB)
+          <input type="file" accept=".csv,text/csv" disabled={busy} onChange={async event => {
+            const file = event.target.files?.[0]
+            const selectedRevision = revision.current
+            event.target.value = ''
+            if (!file) return
+            if (file.size > 1048576) { setError('Ledger must be at most 1 MiB.'); return }
+            try {
+              const text = await file.text()
+              if (!mounted.current || selectedRevision !== revision.current) return
+              if (text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] !== 'date,type,amount_paise') throw new Error('Use the CSV columns date,type,amount_paise.')
+              const existing = historicalInput.trim() ? JSON.parse(historicalInput) : {
+                context, observed_at: new Date().toISOString(), provenance: 'user ledger upload', licence: 'uploaded by account owner',
+              }
+              setHistoricalInput(JSON.stringify({ ...existing, ledger_csv: text }, null, 2))
+              setResult(null)
+              setError('')
+            } catch (error) { setError(failure(error)) }
+          }} />
+        </label>
+        <p>Standard CSV format: date,type,amount_paise. Dates use YYYY-MM-DD; amounts are nonnegative integer paise. Types: DEPOSIT, WITHDRAWAL, CHARGE, SETTLEMENT_CREDIT, SETTLEMENT_DEBIT. Remove personal identifiers. The upload is submitted with your next question and stored privately with your account. Clear the text below to remove it before submission.</p>
         <label>Declared historical input JSON
           <textarea value={historicalInput} maxLength={2000000} disabled={busy} onChange={event => setHistoricalInput(event.target.value)} />
         </label>
