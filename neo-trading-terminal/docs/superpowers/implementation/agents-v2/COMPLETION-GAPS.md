@@ -19,9 +19,9 @@ P0–P11 are not fully accepted. Offline tests establish the behavior below; the
 
 Internal work is distinct from external validation: adapters/calculations explicitly named above remain implementation work. Missing-data behavior and declared scenarios are not verified production coverage.
 
-Source probe: the official NSE page links `https://nsearchives.nseindia.com/content/fo/fo_secban.csv` for the next trade date. A bounded public HTTPS probe on this host timed out. Its current schema/effective trading date has not been validated; do not infer a date from download time or invent a header/parser to claim complete ban coverage. A dated representative publication is needed for that adapter.
+Source probe update: bounded HTTPS acquisition succeeded on2026-11-13. The official CSV explicitly states its trade date in the first line and supplies numbered symbol rows. A strict date-bound parser is implemented and locally tested; mounting acquisition/cache into capture and validating empty-day formats remain incomplete. Never infer the trade date from download time.
 
-Read-only live-check authorization was granted by the user's continuation after the explicit request. Local model checks have now run; no authenticated broker session was available, and configured credentials were not used to infer an owner. Further source-backed integration needs the running terminal with an individual signed-in account, representative sanitized fixtures and authoritative dated schedules. Authorization does not cover orders, execution or deployment.
+Read-only live-check authorization was granted by the user's continuation after the explicit request. Local model checks have run. The user subsequently signed in: the live UI confirms broker connectivity, populated holdings/funds and159,551 indexed instruments, while positions/orders fail and holdings identity matching remains pending. Further integration needs diagnosis of those responses, representative sanitized fixtures and authoritative dated schedules. Authorization does not cover orders, execution or deployment.
 
 Default rollout: ANALYTICS_TOOLS_ENABLED=false, ANALYTICS_ADVISORY_ENABLED=false, ANALYTICS_COMPOSITE_ENABLED=false. Tools enable snapshots; advisory additionally enables eligible hypothetical candidates; composite additionally enables unified analytics chat/UI.
 
