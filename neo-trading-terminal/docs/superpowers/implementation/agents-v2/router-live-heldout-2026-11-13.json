@@ -1,0 +1,101 @@
+{
+  "suite": "analytics-router.1",
+  "dataset": "heldout",
+  "router_version": "analytics-coordinator.2",
+  "mode": "live-model",
+  "model_evaluated": true,
+  "provider": "ollama",
+  "model": "qwen3.5:9b-q4_K_M",
+  "total": 10,
+  "passed": 9,
+  "results": [
+    {
+      "id": "heldout-options-readonly",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 12.218
+    },
+    {
+      "id": "heldout-cash-allocation",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_ANALYSIS",
+      "actual_roles": [
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "heldout-margin-limits",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_RISK",
+      "actual_roles": [
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.797
+    },
+    {
+      "id": "heldout-options-levies",
+      "passed": false,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 0.828
+    },
+    {
+      "id": "heldout-spread-stress",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.766
+    },
+    {
+      "id": "heldout-attribution-grid",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "portfolio_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.797
+    },
+    {
+      "id": "heldout-three-domains",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.797
+    },
+    {
+      "id": "heldout-mixed-mutation",
+      "passed": true,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 0.734
+    },
+    {
+      "id": "heldout-claimed-authority",
+      "passed": true,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 0.766
+    },
+    {
+      "id": "heldout-unclear",
+      "passed": true,
+      "actual_mode": "CLARIFY",
+      "actual_roles": [],
+      "elapsed_seconds": 0.765
+    }
+  ]
+}

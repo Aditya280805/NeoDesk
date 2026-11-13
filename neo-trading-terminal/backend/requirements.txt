@@ -16,3 +16,10 @@ openai==2.54.0
 google-genai==2.33.0
 # Bounded CSV/Parquet historical import; CPython 3.12 Windows wheel verified.
 pyarrow==20.0.0
+# Deterministic analytics; TA-Lib wheels bundle their native library.
+numpy==2.5.4
+TA-Lib==0.6.8
+PyPortfolioOpt==1.5.6
+# PyPortfolioOpt 1.5.6 relies on a SciPy API removed after this series.
+scipy==1.16.3
+pandas==2.3.3

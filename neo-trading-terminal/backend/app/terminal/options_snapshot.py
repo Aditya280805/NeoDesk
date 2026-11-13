@@ -71,8 +71,8 @@ def normalize_snapshot(raw, context: OptionsContext):
             raise ValueError('Missing contract metadata')
         verified = {}
         for field, keys, expected, convert in (
-            ('underlying', ('underlying', 'underlyingSymbol'), context.underlying, identity),
-            ('exchange', ('exchange', 'exchange_segment'), context.exchange, identity),
+            ('underlying', ('underlying', 'underlyingSymbol','unlSymbol'), context.underlying, identity),
+            ('exchange', ('exchange', 'exchange_segment','exSeg'), context.exchange, identity),
             ('expiry', ('expiryDt', 'expiry'), context.expiry, expiry_identity),
         ):
             values = [common[key] for key in keys if common.get(key) not in (None, '')]
@@ -92,6 +92,8 @@ def normalize_snapshot(raw, context: OptionsContext):
                 oi = leg.get('openInterest', leg.get('oi')) or {}
                 if not all(isinstance(item, dict) for item in (instrument, quote, oi)):
                     raise ValueError('Invalid nested option fields')
+                if instrument.get('optionType') not in (None,'','CE' if kind=='CALL' else 'PE'):
+                    raise ValueError('Contradictory option side')
                 rows.append({
                     'side': kind,
                     'symbol': str(instrument['symbol'])[:100],
@@ -100,6 +102,18 @@ def normalize_snapshot(raw, context: OptionsContext):
                     'volume': number(quote.get('volume', quote.get('vol'))),
                     'open_interest': number(oi.get('current', oi.get('cur'))),
                 })
+                for output,mapping,keys in (('previous_open_interest',oi,('previous','prev')),('previous_price',quote,('prevClose','pc'))):
+                    supplied = [number(mapping[key]) for key in keys if mapping.get(key) is not None]
+                    if supplied:
+                        if any(value!=supplied[0] for value in supplied):
+                            raise ValueError('Contradictory previous observation aliases')
+                        rows[-1][output] = supplied[0]
+                if instrument.get('neoSymbol') is not None:
+                    contract_id = instrument['neoSymbol']
+                    prefix = context.exchange+'|'
+                    if not isinstance(contract_id,str) or not contract_id.startswith(prefix) or not contract_id[len(prefix):].isascii() or not contract_id[len(prefix):].isdigit() or len(contract_id)>100:
+                        raise ValueError('Invalid provider contract identity')
+                    rows[-1]['contract_id'] = contract_id
         if not rows:
             raise ValueError('Empty option chain')
         call_oi = [r['open_interest'] for r in rows if r['side'] == 'CALL']

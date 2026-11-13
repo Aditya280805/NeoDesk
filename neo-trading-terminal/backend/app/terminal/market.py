@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import math
 import os
 import time
@@ -68,6 +69,7 @@ def parse_master(text, segment):
                      'source_metadata': {'source': 'kotak-scrip-master',
                                          'lLotSize': row.get('lLotSize', ''),
                                          'pInstType': row.get('pInstType', '')},
+                     'identity_source_fields': {key:row.get(key,'') for key in ('pSymbol','pSymbolName','pExchSeg','pTrdSymbol','pOptionType','lExpiryDate','pExpiryDate','dStrikePrice','pGroup','pISIN')},
                      'strike': number('dStrikePrice', 0) / 100, 'isin': row.get('pISIN', '')})
     if not rows:
         raise BrokerError(f'Kotak returned no valid instruments for {segment}.')
@@ -276,6 +278,13 @@ class Market:
                 raise MarketDeadlineError('Portfolio request deadline expired.')
             try:
                 result = getattr(broker_to_call._sdk(), method)(**kwargs)
+                if method in ('holdings','positions','order_report','limits','trade_report'):
+                    from .portfolio_source_diagnostics import source_shape
+                    logging.getLogger(__name__).info('portfolio_source_shape method=%s shape=%s',method,source_shape(result))
+                from .portfolio_source_diagnostics import normalized_empty
+                empty = normalized_empty(method,result)
+                if empty is not None:
+                    return empty
                 if isinstance(result, dict) and ('rate limit' in str(result.get('error', '')).lower() or str(result.get('stCode',result.get('status_code','')))=='429'):
                     headers=result.get('headers') if isinstance(result.get('headers'),dict) else {}
                     raise MarketQuotaError(headers.get('Retry-After',headers.get('retry-after',60)))

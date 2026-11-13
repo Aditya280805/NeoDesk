@@ -22,7 +22,7 @@ from app.terminal.server import create_app
 def app(tmp_path, monkeypatch):
     _clear_rate_limits()
     app = create_app(Settings(_env_file=None, data_dir=tmp_path, environment='test', app_password=None,
-        kotak_consumer_key=None, openai_api_key=SecretStr('fixture'), options_mcp_port=0))
+        kotak_consumer_key=None, options_agent_provider='openai', openai_api_key=SecretStr('fixture'), options_mcp_port=0))
     chain_fetch = Mock(side_effect=AssertionError('Portfolio must not fetch chain'))
     def call(method, user_id, **kwargs):
         if method not in ('limits','holdings','positions','order_report'):

@@ -27,6 +27,18 @@ class UnifiedChatRequest(BaseModel):
     conversation_id: UUID | None = None
     report_kind: Literal['strategy', 'scan', 'alert', 'backtest'] | None = None
     report_id: UUID | None = None
+    analytics_mode: bool = False
+    historical_input: dict | None = None
+    continuation_id: UUID | None = None
+    continuation_action_id: UUID | None = None
+
+    @field_validator('historical_input')
+    @classmethod
+    def validated_historical_input(cls, value):
+        if value is not None:
+            from .analytics_inputs import HistoricalAnalyticsInput
+            return HistoricalAnalyticsInput.model_validate(value).model_dump(mode='json')
+        return None
 
     @field_validator('message')
     @classmethod
@@ -191,6 +203,15 @@ def _record_parent_run(service, user_id, run_id, status, started, detail):
 
 
 async def dispatch_unified(service, user_id, body):
+    if body.historical_input is not None and not body.analytics_mode:
+        raise HTTPException(422, 'Historical analytics inputs require analytics mode.')
+    if (body.continuation_id is not None or body.continuation_action_id is not None) and not body.analytics_mode:
+        raise HTTPException(422, 'Continuations require analytics mode.')
+    if body.analytics_mode:
+        if body.report_kind is not None or body.report_id is not None or body.conversation_id is not None:
+            raise HTTPException(422, 'Start analytics with a market context and no legacy conversation or report.')
+        from .analytics_coordinator import dispatch_analytics
+        return await dispatch_analytics(service, user_id, body)
     if body.report_kind is not None or body.report_id is not None:
         if body.report_kind is None or body.report_id is None:
             raise HTTPException(422, 'Select both a saved report kind and report ID.')
@@ -263,7 +284,8 @@ async def dispatch_unified(service, user_id, body):
     parent_run_id = str(uuid4())
     input_limit = getattr(service.config, 'agent_input_token_estimate_limit', 24000) if hasattr(service, 'config') and service.config else 24000
     context_limit = getattr(service.config, 'agent_context_token_limit', 32768) if hasattr(service, 'config') and service.config else 32768
-    harness = RequestHarness(auto=True, input_limit=input_limit, context_limit=context_limit)
+    harness = RequestHarness(auto=True, input_limit=input_limit, context_limit=context_limit,
+        deadline=started + getattr(getattr(service, 'config', None), 'agent_request_timeout_seconds', 85))
     harness.admission_owner = (service, user_id) if limiter else None
     harness.delegations = 0
     parent_detail = {
@@ -361,7 +383,12 @@ async def dispatch_unified(service, user_id, body):
         persist_parent('cancelled', 'cancelled')
         raise
     except HTTPException as error:
-        reason = 'specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed'
+        detail = error.detail if isinstance(error.detail, dict) else {}
+        reason = (
+            'conversation_scope_changed'
+            if error.status_code == 409 and detail.get('code') == 'conversation_scope_changed'
+            else ('specialist_failed' if 'specialist' in parent_detail['stages'] else 'routing_failed')
+        )
         persist_parent('failed', reason)
         error.headers = {**(error.headers or {}), 'X-Options-Run-Id': parent_run_id}
         raise

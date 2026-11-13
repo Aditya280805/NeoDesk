@@ -40,6 +40,7 @@ function createVmContext(globals = {}) {
     AbortController,
     AbortSignal,
     DOMException,
+    TextDecoder,
     Event,
     ...globals,
   })
@@ -178,6 +179,11 @@ function createHarness(options = {}) {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(),
+      body: url.endsWith('/stream') ? new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(`event: stage\ndata: {"stage":"model"}\n\nevent: completed\ndata: ${JSON.stringify(result.data)}\n\n`))
+        controller.close()
+      } }) : undefined,
       json: async () => result.data,
     }
   }
@@ -366,7 +372,7 @@ test('explicit Options and trading mode calls chain endpoint and renders chain e
 
     const chatCalls = h.requests.filter(r => r.url.includes('/chat'))
     assert.equal(chatCalls.length, 1)
-    assert.equal(chatCalls[0].url, '/api' + chainFixture.endpoint.replace(/^\/api/, ''))
+    assert.equal(chatCalls[0].url, '/api' + chainFixture.endpoint.replace(/^\/api/, '') + '/stream')
     assert.equal(chatCalls[0].body.message, chainFixture.request.message)
     assert.equal(chatCalls[0].body.underlying, chainFixture.request.underlying)
     assert.equal(chatCalls[0].body.exchange, chainFixture.request.exchange)
@@ -406,7 +412,7 @@ test('explicit Portfolio analysis mode calls portfolio endpoint and renders Port
 
     const chatCalls = h.requests.filter(r => r.url.includes('/chat'))
     assert.equal(chatCalls.length, 1)
-    assert.equal(chatCalls[0].url, '/api' + portfolioFixture.endpoint.replace(/^\/api/, ''))
+    assert.equal(chatCalls[0].url, '/api' + portfolioFixture.endpoint.replace(/^\/api/, '') + '/stream')
     assert.deepEqual(chatCalls[0].body, { message: portfolioFixture.request.message })
 
     const html = h.html(h.render())
@@ -444,7 +450,7 @@ test('explicit Portfolio risk mode calls risk endpoint and renders PortfolioRisk
 
     const chatCalls = h.requests.filter(r => r.url.includes('/chat'))
     assert.equal(chatCalls.length, 1)
-    assert.equal(chatCalls[0].url, '/api' + riskFixture.endpoint.replace(/^\/api/, ''))
+    assert.equal(chatCalls[0].url, '/api' + riskFixture.endpoint.replace(/^\/api/, '') + '/stream')
     assert.deepEqual(chatCalls[0].body, { message: riskFixture.request.message })
 
     const html = h.html(h.render())
@@ -491,7 +497,7 @@ test('Auto-select routes chain, portfolio, and risk in one request each and acti
       await findForm(tree).props.onSubmit({ preventDefault() {} })
       await settle()
 
-      const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat')
+      const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat/stream')
       assert.equal(unifiedCalls.length, 1)
       assert.equal(unifiedCalls[0].body.message, fixture.request.message)
 
@@ -548,7 +554,7 @@ test('Auto-select clarify renders text only, creates no specialist conversation,
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat')
+    const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat/stream')
     assert.equal(unifiedCalls.length, 2)
     assert.equal(unifiedCalls[1].body.conversation_id ?? null, null)
   } finally {
@@ -620,7 +626,7 @@ test('HTTP 409 conversation_scope_changed preserves draft, retains conversation 
     await settle()
 
     const lastCall = h.requests.at(-1)
-    assert.equal(lastCall.url, '/api/options-agent/unified-chat')
+    assert.equal(lastCall.url, '/api/options-agent/unified-chat/stream')
     assert.equal(lastCall.body.conversation_id ?? null, null)
     assert.equal(lastCall.body.message, scopeChangeFixture.request.message)
   } finally {
@@ -814,7 +820,7 @@ test('follow-up sends conversation_id and monitoring watcher stops on mode switc
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const chatCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat')
+    const chatCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat/stream')
     assert.equal(chatCalls.length, 2)
     assert.equal(chatCalls[0].body.conversation_id, undefined)
     assert.equal(chatCalls[1].body.conversation_id, portfolioFixture.response.conversation_id)
@@ -870,7 +876,7 @@ test('Auto follow-up clarify retains active conversation_id and rejects spurious
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat')
+    const unifiedCalls = h.requests.filter(r => r.url === '/api/options-agent/unified-chat/stream')
     assert.equal(unifiedCalls.length, 3)
     assert.equal(unifiedCalls[1].body.conversation_id, portfolioFixture.response.conversation_id)
     assert.equal(unifiedCalls[2].body.conversation_id, portfolioFixture.response.conversation_id)
@@ -901,6 +907,16 @@ test('Auto follow-up clarify retains active conversation_id and rejects spurious
 
 test('validateReply rejects mismatched agent_id, non-read-only replies, blank answers, mid-conversation scope flips, and partial/leaky evidence', async () => {
   const cases = [
+    {
+      name: 'clarify response leaking specialist evidence references',
+      mode: 'auto',
+      payload: {
+        ...clarifyFixture.response,
+        evidence_ids: [portfolioFixture.response.portfolio_snapshot.evidence_id],
+        risk_report: riskFixture.response.risk_snapshot.risk_report,
+      },
+      expectedMessage: 'Clarification response must not include specialist evidence.',
+    },
     {
       name: 'wrong agent_id in explicit chain mode',
       mode: 'chain',
@@ -970,6 +986,23 @@ test('validateReply rejects mismatched agent_id, non-read-only replies, blank an
         risk_snapshot: {
           evidence_id: riskFixture.response.risk_snapshot.evidence_id,
           risk_report: { report_id: 'r-partial', evaluated_at: '2026-11-11T10:34:12Z', summary: 'pass' },
+        },
+      },
+      expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
+    },
+    {
+      name: 'risk_snapshot finding has invalid code and outcome types',
+      mode: 'risk',
+      payload: {
+        ...riskFixture.response,
+        risk_snapshot: {
+          ...riskFixture.response.risk_snapshot,
+          risk_report: {
+            ...riskFixture.response.risk_snapshot.risk_report,
+            findings: riskFixture.response.risk_snapshot.risk_report.findings.map((finding, index) =>
+              index === 0 ? { ...finding, code: 123, outcome: null } : finding
+            ),
+          },
         },
       },
       expectedMessage: 'Portfolio risk response is missing required risk report evidence.',
@@ -1179,7 +1212,7 @@ test('changeContext preserves draft question, cleared Underlying disables chain 
     await findForm(tree).props.onSubmit({ preventDefault() {} })
     await settle()
 
-    const autoCall = h.requests.filter(r => r.url === '/api/options-agent/unified-chat').at(-1)
+    const autoCall = h.requests.filter(r => r.url === '/api/options-agent/unified-chat/stream').at(-1)
     assert.equal('context' in autoCall.body, false)
 
     // In explicit chain mode with blank Underlying, Send is disabled to prevent HTTP 422.
@@ -1305,7 +1338,37 @@ test('snapshotError renders exact ApiError and refresh validation messages in a 
     assert.notEqual(snapAlert.type, 'p')
     assert.equal(treeNodes(snapAlert).some(n => n.type === 'p'), false)
     assert.equal(textOf(snapAlert), 'Portfolio risk snapshot is missing risk report evidence.')
+
+    // Incomplete chain refresh payload must be rejected before it reaches the renderer.
+    findScopeSelect(tree).props.onChange({ target: { value: 'chain' } })
+    tree = h.render()
+    h.queue({ status: 200, data: { rows: [], underlying: 'NIFTY' } })
+    await findButton(tree, 'Refresh snapshot').props.onClick()
+    await settle()
+
+    tree = h.render()
+    snapAlert = treeNodes(tree).find(n => n.props?.role === 'alert')
+    assert.ok(snapAlert)
+    assert.equal(textOf(snapAlert), 'Options chain snapshot evidence is incomplete.')
   } finally {
     h.unmount()
   }
+})
+
+
+test('agent stream handles split Unicode and rejects EOF without completion', async () => {
+  async function run(frames) {
+    const bytes = new TextEncoder().encode(frames)
+    const { agentStream } = loadTs('lib/agentStream.ts', {}, {
+      TextDecoder, window: { location: { port: '8000' } },
+      fetch: async () => new Response(new ReadableStream({ start(controller) {
+        for (const byte of bytes) controller.enqueue(new Uint8Array([byte]))
+        controller.close()
+      } }), { status: 200 }),
+    })
+    return agentStream('/options-agent/chat', {}, new AbortController().signal, () => {})
+  }
+  const result = await run('event: completed\ndata: {"answer":"₹ validated"}\n\n')
+  assert.equal(result.answer, '₹ validated')
+  await assert.rejects(run('event: delta\ndata: {"content":"partial"}\n\n'), /before the answer was validated/)
 })

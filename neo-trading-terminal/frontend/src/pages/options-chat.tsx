@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { agentStream } from '@/lib/agentStream'
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { MessageCircle, RefreshCw, Send, ShieldCheck } from 'lucide-react'
 import { ApiError, api, failure, money } from '@/lib/api'
@@ -8,6 +9,157 @@ import type { PortfolioSnapshot } from '@/lib/portfolioEvidence'
 import { PortfolioRiskEnvelope, RiskReport, canPublish } from '@/lib/portfolioRisk'
 import PortfolioRiskPanel from '@/components/PortfolioRiskPanel'
 import PortfolioRiskSettings from '@/components/PortfolioRiskSettings'
+import AnalyticsChat from '@/components/AnalyticsChat'
+
+function renderInline(text: string): React.ReactNode[] {
+  const tokenRegex = /(\*\*[^*]+\*\*|`[^`]+`|'[^']+'|\b(?:zero active policy breaches|no active policy breaches|0 active policy breaches)\b|\b(?:cannot_assess|cannot assess)\b|\b(?:breached|breach|active breaches)\b|\b(?:passed|pass)\b|\b(?:limit_not_configured|limit not configured)\b|\b(?:put\/call ratio|pcr|call oi|put oi|open interest)\b|\b(?:holdings value|invested value|unrealized p&l|realized p&l|available margin|available cash)\b)/gi
+
+  const parts = text.split(tokenRegex)
+  return parts.map((part, index) => {
+    if (!part) return null
+
+    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+      const inner = part.slice(2, -2)
+      return (
+        <strong key={index} className="chat-bold">
+          {renderInline(inner)}
+        </strong>
+      )
+    }
+
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      return (
+        <code key={index} className="chat-inline-code">
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+
+    if (part.startsWith("'") && part.endsWith("'") && part.length >= 2) {
+      const inner = part.slice(1, -1)
+      if (inner.includes('_') || inner === 'cannot_assess' || inner === 'limit_not_configured' || inner === 'breached') {
+        return (
+          <code key={index} className="chat-inline-code">
+            {inner}
+          </code>
+        )
+      }
+      return <span key={index} className="chat-quoted">&lsquo;{inner}&rsquo;</span>
+    }
+
+    const lower = part.toLowerCase()
+    if (lower.includes('zero active policy breaches') || lower.includes('no active policy breaches') || lower.includes('0 active policy breaches') || lower === 'passed' || lower === 'pass') {
+      return (
+        <span key={index} className="chat-status-pass">
+          {part}
+        </span>
+      )
+    }
+    if (lower.includes('cannot_assess') || lower.includes('cannot assess') || lower.includes('limit_not_configured') || lower.includes('limit not configured')) {
+      return (
+        <span key={index} className="chat-status-unconfigured">
+          {part}
+        </span>
+      )
+    }
+    if (lower.includes('breach') || lower.includes('breached') || lower.includes('active breaches')) {
+      return (
+        <span key={index} className="chat-status-breach">
+          {part}
+        </span>
+      )
+    }
+    if (
+      lower.includes('put/call ratio') ||
+      lower === 'pcr' ||
+      lower === 'call oi' ||
+      lower === 'put oi' ||
+      lower === 'open interest' ||
+      lower.includes('holdings value') ||
+      lower.includes('invested value') ||
+      lower.includes('p&l') ||
+      lower.includes('available margin') ||
+      lower.includes('available cash')
+    ) {
+      return (
+        <span key={index} className="chat-metric-tag">
+          {part}
+        </span>
+      )
+    }
+
+    return part
+  })
+}
+
+function FormattedAnswer({ content }: { content: string }) {
+  if (!content) return null
+
+  const raw = content.trim()
+  const lines = raw.split('\n')
+  const blocks: React.ReactNode[] = []
+  let currentList: string[] = []
+  let listKey = 0
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      blocks.push(
+        <ul key={`ul-${listKey++}`} className="chat-bullet-list">
+          {currentList.map((item, i) => (
+            <li key={i} className="chat-bullet-item">
+              {renderInline(item)}
+            </li>
+          ))}
+        </ul>
+      )
+      currentList = []
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]
+    const trimmed = rawLine.trim()
+
+    if (!trimmed) {
+      flushList()
+      continue
+    }
+
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      currentList.push(trimmed.slice(2).trim())
+      continue
+    }
+
+    flushList()
+
+    if (trimmed.startsWith('### ')) {
+      blocks.push(
+        <h4 key={`h4-${i}`} className="chat-subheading">
+          {renderInline(trimmed.slice(4).trim())}
+        </h4>
+      )
+      continue
+    }
+    if (trimmed.startsWith('## ')) {
+      blocks.push(
+        <h3 key={`h3-${i}`} className="chat-heading">
+          {renderInline(trimmed.slice(3).trim())}
+        </h3>
+      )
+      continue
+    }
+
+    blocks.push(
+      <p key={`p-${i}`} className="chat-paragraph">
+        {renderInline(trimmed)}
+      </p>
+    )
+  }
+
+  flushList()
+
+  return <div className="chat-formatted-body">{blocks}</div>
+}
 
 type ChatMode = 'chain' | 'portfolio' | 'risk' | 'auto'
 type ConcreteScope = 'chain' | 'portfolio' | 'risk'
@@ -28,6 +180,8 @@ type RiskSnapshot = {
   risk_report?: RiskReport
 }
 type AgentStatus = {
+  analytics_tools_enabled?: boolean
+  analytics_composite_enabled?: boolean
   configured: boolean
   model_configured: boolean
   mcp_ready: boolean
@@ -151,10 +305,27 @@ function hasRiskReportShape(report: unknown): boolean {
     isRecord(report.coverage) &&
     Array.isArray(report.findings) &&
     report.findings.every(
-      f => isRecord(f) && Array.isArray(f.affected_row_ids) && Array.isArray(f.reason_codes)
+      f =>
+        isRecord(f) &&
+        typeof f.code === 'string' &&
+        typeof f.outcome === 'string' &&
+        isStringArray(f.affected_row_ids) &&
+        isStringArray(f.reason_codes)
     ) &&
     isRecord(report.observation_times) &&
     isStringArray(report.limitations)
+  )
+}
+
+function hasChainSnapshotShape(snapshot: unknown): snapshot is Snapshot {
+  return (
+    isRecord(snapshot) &&
+    Array.isArray(snapshot.rows) &&
+    typeof snapshot.underlying === 'string' &&
+    typeof snapshot.expiry === 'string' &&
+    typeof snapshot.retrieved_at === 'string' &&
+    isRecord(snapshot.summary) &&
+    isStringArray(snapshot.limitations)
   )
 }
 
@@ -187,7 +358,17 @@ function validateReply(
     if (currentMode !== 'auto' || raw.agent_id !== EXPECTED_AGENT_ID.clarify) {
       throw new Error('Unexpected clarification response from server.')
     }
-    if ('snapshot' in raw || 'portfolio_snapshot' in raw || 'risk_snapshot' in raw) {
+    if (
+      'snapshot' in raw ||
+      'portfolio_snapshot' in raw ||
+      'risk_snapshot' in raw ||
+      'evidence_ids' in raw ||
+      'snapshot_ids' in raw ||
+      'risk_report_ids' in raw ||
+      'report_ids' in raw ||
+      'report' in raw ||
+      'risk_report' in raw
+    ) {
       throw new Error('Clarification response must not include specialist evidence.')
     }
     const rawCid = raw.conversation_id
@@ -222,15 +403,7 @@ function validateReply(
 
   if (targetScope === 'chain') {
     const snap = raw.snapshot
-    if (
-      !isRecord(snap) ||
-      !Array.isArray(snap.rows) ||
-      typeof snap.underlying !== 'string' ||
-      typeof snap.expiry !== 'string' ||
-      typeof snap.retrieved_at !== 'string' ||
-      !isRecord(snap.summary) ||
-      !isStringArray(snap.limitations)
-    ) {
+    if (!hasChainSnapshotShape(snap)) {
       throw new Error('Options chain response is missing required snapshot evidence.')
     }
     return {
@@ -326,6 +499,8 @@ export default function OptionsChat() {
 
   const activeChatVersion = useRef<number | null>(null)
   const activeSnapshotVersion = useRef<number | null>(null)
+  const chatAbort = useRef<AbortController | null>(null)
+  const [chatStage, setChatStage] = useState('')
   const mounted = useRef(true)
   const revision = useRef(0)
   const bottom = useRef<HTMLDivElement>(null)
@@ -360,6 +535,7 @@ export default function OptionsChat() {
     const timer = setInterval(() => setNow(Date.now()), 10000)
 
     return () => {
+      chatAbort.current?.abort()
       mounted.current = false
       revision.current += 1
       activeChatVersion.current = null
@@ -402,6 +578,9 @@ export default function OptionsChat() {
       } else {
         const result = await api<Snapshot>('/options-agent/snapshot', 'POST', context)
         if (canPublish(version, revision.current, mounted.current)) {
+          if (!hasChainSnapshotShape(result)) {
+            throw new Error('Options chain snapshot evidence is incomplete.')
+          }
           setSnapshot(result)
           setSnapshotError('')
           setNow(Date.now())
@@ -430,6 +609,7 @@ export default function OptionsChat() {
   }, [turns, busy])
 
   function resetConversationState(clearQuestion: boolean) {
+    chatAbort.current?.abort()
     revision.current += 1
     activeChatVersion.current = null
     activeSnapshotVersion.current = null
@@ -478,6 +658,9 @@ export default function OptionsChat() {
 
     const version = revision.current
     activeChatVersion.current = version
+    const controller = new AbortController()
+    chatAbort.current = controller
+    setChatStage(mode === 'auto' ? 'Routing your question…' : 'Starting analysis…')
     setBusy(true)
     setError('')
     setScopeChangeConflict(false)
@@ -506,7 +689,11 @@ export default function OptionsChat() {
         }
       }
 
-      const raw = await api<unknown>(path, 'POST', body)
+      const raw = await agentStream(path, body, controller.signal, stage => {
+          if (canPublish(version, revision.current, mounted.current)) {
+            setChatStage(stage === 'model' ? 'Generating and validating your answer…' : stage === 'mcp' ? 'Reading current evidence…' : 'Request accepted…')
+          }
+        })
       if (!canPublish(version, revision.current, mounted.current)) return
 
       const result = validateReply(raw, mode, resolvedScope, conversationId)
@@ -539,7 +726,7 @@ export default function OptionsChat() {
       if (canPublish(version, revision.current, mounted.current)) {
         const isScopeConflict = e instanceof ApiError && e.status === 409 && e.code === 'conversation_scope_changed'
         setScopeChangeConflict(isScopeConflict)
-        setError(failure(e))
+        setError(controller.signal.aborted ? 'Analysis stopped.' : failure(e) + (e instanceof ApiError && e.runId ? ` (Run: ${e.runId})` : ''))
         setMonitoring(false)
       }
     } finally {
@@ -659,6 +846,8 @@ export default function OptionsChat() {
 
     {effectiveScope === 'risk' && <PortfolioRiskSettings onRevision={setPolicyRevision} />}
 
+    {status?.analytics_tools_enabled && status?.analytics_composite_enabled && <AnalyticsChat key={JSON.stringify(context)} context={context} />}
+
     <div className="options-chat-layout">
       <section className="panel options-conversation" aria-label="Options conversation">
         <div className="section-heading">
@@ -707,32 +896,98 @@ export default function OptionsChat() {
             <div className="options-turn" key={index}>
               <div className="options-message options-user"><small>YOU</small><p>{turn.question}</p></div>
               <div className="options-message options-assistant">
-                <small>OPTIONS AGENT · {turn.agent_id} · scope: {turn.scope}</small>
-                <p>{turn.answer}</p>
+                <div className="options-assistant-header">
+                  <span className="agent-badge">
+                    <ShieldCheck size={14} className={`agent-icon ${turn.scope}`} />
+                    <b>{turn.scope === 'risk' ? 'Portfolio Risk Specialist' :
+                        turn.scope === 'portfolio' ? 'Portfolio Specialist' :
+                        turn.scope === 'chain' ? 'Options Trading Specialist' :
+                        'Trading Specialist'}</b>
+                  </span>
+                  <small>OPTIONS AGENT · {turn.agent_id} · scope: {turn.scope}</small>
+                </div>
+                <div className="options-answer-container">
+                  <FormattedAnswer content={turn.answer} />
+                </div>
                 {turn.scope === 'portfolio' && (
                   <div className="options-evidence">
-                    <PortfolioEvidence snapshot={turn.portfolio_snapshot} />
-                    <p>Cited evidence: {turn.evidence_ids.join(', ')}</p>
+                    <details className="options-evidence-disclosure">
+                      <summary className="options-evidence-summary">
+                        <span className="evidence-summary-badge">
+                          <ShieldCheck size={12} /> Portfolio Evidence
+                        </span>
+                        <span className="evidence-summary-hint">View deterministic audit trail ▾</span>
+                      </summary>
+                      <div className="options-evidence-body">
+                        <PortfolioEvidence snapshot={turn.portfolio_snapshot} />
+                        <p className="options-citation-line">Cited evidence: {turn.evidence_ids.join(', ')}</p>
+                      </div>
+                    </details>
                   </div>
                 )}
                 {turn.scope === 'risk' && (
                   <div className="options-evidence">
-                    <PortfolioRiskPanel report={turn.risk_snapshot.risk_report} currentRevision={policyRevision} />
-                    <p>Cited evidence: {turn.evidence_ids.join(', ')} · Risk reports: {turn.risk_report_ids.join(', ')}</p>
+                    <details className="options-evidence-disclosure">
+                      <summary className="options-evidence-summary">
+                        <span className="evidence-summary-badge">
+                          <ShieldCheck size={12} /> Deterministic Risk Audit
+                        </span>
+                        <span className="evidence-summary-hint">
+                          {turn.risk_snapshot.risk_report ?
+                            `Report: ${turn.risk_snapshot.risk_report.coverage.passed} passed · ${turn.risk_snapshot.risk_report.coverage.breached} breached · ${turn.risk_snapshot.risk_report.coverage.cannot_assess} unconfigured ▾` :
+                            'View deterministic audit trail ▾'}
+                        </span>
+                      </summary>
+                      <div className="options-evidence-body">
+                        <PortfolioRiskPanel report={turn.risk_snapshot.risk_report} currentRevision={policyRevision} />
+                        <p className="options-citation-line">Cited evidence: {turn.evidence_ids.join(', ')} · Risk reports: {turn.risk_report_ids.join(', ')}</p>
+                      </div>
+                    </details>
                   </div>
                 )}
                 {turn.scope === 'chain' && (
                   <div className="options-evidence">
-                    Kotak snapshot · {turn.snapshot.underlying} · {turn.snapshot.expiry}
-                    <br />
-                    Retrieved {timestamp(turn.snapshot.retrieved_at)} IST · exchange freshness unverified
+                    <details className="options-evidence-disclosure">
+                      <summary className="options-evidence-summary">
+                        <span className="evidence-summary-badge">
+                          <ShieldCheck size={12} /> Kotak snapshot · {turn.snapshot.underlying} · {turn.snapshot.expiry}
+                        </span>
+                        <span className="evidence-summary-hint">
+                          {turn.snapshot.summary?.put_call_ratio != null ? `PCR: ${turn.snapshot.summary.put_call_ratio.toFixed(2)} · ` : ''}
+                          Retrieved {timestamp(turn.snapshot.retrieved_at)} IST ▾
+                        </span>
+                      </summary>
+                      <div className="options-evidence-body">
+                        <div className="options-chain-kpi-bar">
+                          <div className="chain-kpi-item">
+                            <span className="kpi-label">Put/Call Ratio</span>
+                            <span className="kpi-value">{turn.snapshot.summary?.put_call_ratio != null ? turn.snapshot.summary.put_call_ratio.toFixed(2) : 'Unavailable'}</span>
+                          </div>
+                          <div className="chain-kpi-item">
+                            <span className="kpi-label">Total Call OI</span>
+                            <span className="kpi-value">{count(turn.snapshot.summary?.call_open_interest)}</span>
+                          </div>
+                          <div className="chain-kpi-item">
+                            <span className="kpi-label">Total Put OI</span>
+                            <span className="kpi-value">{count(turn.snapshot.summary?.put_open_interest)}</span>
+                          </div>
+                          <div className="chain-kpi-item">
+                            <span className="kpi-label">Contracts</span>
+                            <span className="kpi-value">{turn.snapshot.rows.length}</span>
+                          </div>
+                        </div>
+                        <p className="options-citation-line">
+                          Snapshot {turn.snapshot.snapshot_id} · Retrieved {timestamp(turn.snapshot.retrieved_at)} IST · exchange freshness unverified
+                        </p>
+                      </div>
+                    </details>
                   </div>
                 )}
               </div>
             </div>
           ))}
 
-          {busy && <p className="options-thinking" role="status">{activeMeta.thinking}</p>}
+          {busy && <p className="options-thinking" role="status">{chatStage || activeMeta.thinking} {<button type="button" onClick={() => chatAbort.current?.abort()}>Stop</button>}</p>}
           <div ref={bottom} />
         </div>
 

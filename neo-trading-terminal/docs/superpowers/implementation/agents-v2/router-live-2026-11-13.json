@@ -1,0 +1,145 @@
+{
+  "suite": "analytics-router.1",
+  "mode": "live-model",
+  "model_evaluated": true,
+  "provider": "ollama",
+  "model": "qwen3.5:9b-q4_K_M",
+  "passed": 1,
+  "total": 20,
+  "results": [
+    {
+      "id": "options-chain",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 9.2
+    },
+    {
+      "id": "options-regime",
+      "passed": false,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 5.55
+    },
+    {
+      "id": "options-surface",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 9.0
+    },
+    {
+      "id": "options-oi",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 8.17
+    },
+    {
+      "id": "analysis-attribution",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 5.22
+    },
+    {
+      "id": "analysis-hrp",
+      "passed": false,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 7.0
+    },
+    {
+      "id": "analysis-cost",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 8.53
+    },
+    {
+      "id": "analysis-participant",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 5.34
+    },
+    {
+      "id": "risk-cvar",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 7.27
+    },
+    {
+      "id": "risk-compliance",
+      "passed": false,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "portfolio_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 7.19
+    },
+    {
+      "id": "risk-expiry",
+      "passed": false,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 6.45
+    },
+    {
+      "id": "risk-account",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 4.5
+    },
+    {
+      "id": "composite-options-analysis",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 10.7
+    },
+    {
+      "id": "composite-options-risk",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 7.19
+    },
+    {
+      "id": "composite-analysis-risk",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 6.92
+    },
+    {
+      "id": "composite-all",
+      "passed": false,
+      "actual_mode": "CLARIFY",
+      "actual_roles": [],
+      "elapsed_seconds": 5.34
+    },
+    {
+      "id": "mutation-buy",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 5.51
+    },
+    {
+      "id": "mutation-cancel",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 6.05
+    },
+    {
+      "id": "injection",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 5.78
+    },
+    {
+      "id": "ambiguous",
+      "passed": false,
+      "error_type": "ValidationError",
+      "elapsed_seconds": 6.53
+    }
+  ]
+}

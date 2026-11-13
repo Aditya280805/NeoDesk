@@ -1,0 +1,46 @@
+# Execution state — resume here
+
+Workspace: C:/Users/Aditya Bose/OneDrive/Documents/TRADING, branch codex/local-specialist-agents. Do not work in detached d51e. Previous checkpoint2945bf6; current verified slice commit subject: fix(analytics): bind live model routing and evidence choices.
+
+## Authorization and external state
+
+The user's next after the explicit read-only smoke request authorized scoped live broker/model validation. Do not ask again for that scope. No execution/orders/push/deploy or model-download authorization. Started existing installed Ollama service on127.0.0.1:11434; model qwen3.5:9b-q4_K_M already installed. No environment changes or model replacement. No authenticated app/python/node listener exists for broker reads; configured broker credentials do not establish an individual owner. Never infer user1. The official public NSE ban CSV again timed out.
+
+## Verified additions
+
+- Ollama-only role_map preserves system instructions; Agno previously sent developer on the wire and this local model ignored the domain rules. Cloud role mapping unchanged. Wire regression RED→GREEN.
+- Internal RouterIntent single category binds exact public RoutingDecision roles in trusted code. Local deterministic sampling, one call/no backup retry; router128 and specialist256 completion tokens. Coordinator version2 invalidates older incompatible continuations.
+- Model selects short claim/proposal enums from consumed evidence:32 scalar choices/tool, four output claims, sixteen proposals. Server resolves exact evidence IDs/paths/proposal IDs; no extra MCP. Invalid/duplicate/unbound refs fail. Public response shapes unchanged. Qualitative interpretation bounded in schema and revalidated after selection.
+- Declared cash-sleeve sector performance uses daily beginning values and adjusted returns with forward-linked contribution reconciliation. Current weights are never backfilled. Derivatives excluded; intraday trading unmodeled; complete-account coverage false. Short histories work independently of HRP; missing/zero inputs remain scoped unavailable.
+- Official participant HTTP-source outage preserves independent evidence while session/policy/deadline checks remain strict.
+- Reproducible explicit live CLI reports, separate heldout corpus and a guarded real-model/synthetic-MCP specialist smoke.
+
+## Evidence
+
+- Full backend working-tree suite802 passed in298.80s after production code froze. New live-CLI authorization guard was then added/tested separately: all4 eval-CLI tests passed. Prior full799 also passed. No new frontend behavior; unchanged frontend92-test/lint/build/browser checkpoint remains in2945bf6.
+- All four offline evaluation modules exited0; pip check passed. Offline replay is not model quality.
+- Canonical local live router20/20. Initial separate heldout9/10; missed levies question fixed and regression retest10/10. Initial heldout result retained; retest is no longer untouched heldout evidence. No general100% accuracy claim.
+- Real local specialist + real loopback MCP + isolated synthetic source completed with four server-rendered claims, one MCP read, released capabilities,11.75s. Broker_evaluated=false. See LIVE-VALIDATION.md and sanitized JSON reports.
+- Fresh reviewer found no blocking selection/binding issue; independently10 tests passed. Earlier review found the short-history/HRP coupling, fixed with RED→GREEN regression.
+
+## Next work
+
+Official ban cache now mounted in production capture: separate nse-ban-official namespace, exact trade-date key, five-minute reuse, deadline checks before/after SQLite, and refresh of retrieval metadata for unchanged checksums. Captured evidence remains immutable.166 analytics/quant regressions passed; after correcting same-checksum refresh,20 focused source/capture tests passed including stale refresh/reuse. Contract mapping and remaining phase gaps remain open. No server restart, so the signed-in session is preserved and new code awaits restart.
+
+Latest risk integration verification:165 analytics/quant tests passed,651 deselected in28.79s, including official source mounting and sanitized outage behavior. Prior full812-test run predates this integration; no full816-test claim. Resume at source cache/verified contract-symbol mapping and unresolved authenticated portfolio diagnostics.
+
+Current risk integration: production capture with a catalogue now fetches the official publication only when the compliance tool is requested. Publication/date/checksum is appended only to that risk tool, with explicit missing-source handling on HTTP/validation failure and session/deadline rechecks. Required account/contract inputs are not invented or replaced; report-only evidence stays PARTIAL. Captured publication is retained in immutable evidence, but a reusable source cache, contract mapping, empty-day formats and complete-account compliance remain open. Backend remains running on earlier code until restart. Verification: focused18 passed before adding the outage regression; broader analytics/quant run underway.
+
+Added fixed-URL official ban acquisition with no redirects/retries,64KiB streaming bound, shared-deadline checks and checksum/retrieval provenance. Source fetch and expired-deadline tests first failed, then implemented. Acquisition/cache mounting into risk capture remains incomplete; this helper alone does not change production tool coverage. Full812-test result above predates this fetch helper; report focused verification separately.
+
+Latest verification after the ban parser: full backend812 passed in275.72s, focused parser/history11 passed. This checkpoint is a partial source-adapter improvement, not milestone acceptance. No backend restart, live execution, push or deployment performed.
+
+Ban source follow-up: official CSV successfully fetched via bounded PowerShell HTTPS on2026-11-13. Observed header `Securities in Ban For Trade Date 13-NOV-2026:` and one numbered symbol row. A subsequent Python urllib10s probe timed out: acquisition reliability is still unverified. Added analytics_ban_source.parse_ban_publication with explicit requested-date binding, bounded size, strict ordinal/symbol validation and conservative rejection of unknown empty-list formats. Six parser cases plus five history tests passed. This parser is not yet mounted into capture/risk; acquisition/cache/effective-date integration remains open. Full suite launched; record result on completion. This does not close P8 or the other phase gaps.
+
+Current slice: analytics daily history now fetches newest-first up to three nonoverlapping180-calendar-day windows, stopping at200 observations or an explicitly empty older window. Session/deadline checks surround each call; malformed older windows invalidate acquisition. Existing shared deadlines and specialist MCP budgets are unchanged. Five focused tests passed, including the long-lookback regression observed failing before implementation. Full backend suite804 passed in253.81s (the two newest edge tests were added after collection and also passed in the five-test focused run); offline analytics replay20/20 and pip check passed. Running backend has not been restarted, preserving the signed-in broker session; new code awaits restart. Portfolio fetch/identity issues above remain unresolved.
+
+Live UI checkpoint (2026-11-13): terminal started on127.0.0.1:8000 using the existing harness environment, one worker. User signed in; Connections visibly confirms Kotak connected and159,551 catalogue instruments. Authenticated portfolio displays holdings and funds, but positions/orders show fetch_failed and holdings show Catalogue match pending. These are observed production integration gaps; do not claim broker validation complete. No credentials/session cookies extracted, orders submitted, or raw account payloads saved. Trace PortfolioSnapshotService.fetch -> Market.call for section failures and resolve_portfolio_instrument for pending identities. The installed SDK exposes positions/order_report, so missing method names are not established as the cause. Preserve the user's live session during diagnosis; restarting the backend clears it.
+
+Complete the source-backed gaps in COMPLETION-GAPS.md once the terminal is running and an individual account is signed in: authenticated adjusted asset/benchmark/IV/trade/cash-flow adapters, complete dated fees and ban/MWPL publication, verified margin/limits/account aggregation. Public publication availability/schema is still unverified. Broader independent model/provider coverage, remote CI and Docker remain release gates. Flags default off; P0–P11 is not fully accepted.
+
+Preserve concurrent provider work. This slice owns only the role_map field hunk in options_model.py; do not stage its other edits, .env.example, agent_harness, options_agent, specialist_agents, server/router changes or their existing provider tests. All previous analytics constructor/status hunks in options_agent.py were already committed in2945bf6. Read this file and COMPLETION-GAPS only on resume, inspect git status/log, then load affected files; do not repeat completed slices.

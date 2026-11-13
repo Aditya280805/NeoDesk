@@ -119,7 +119,7 @@ def test_live_model_requires_explicit_opt_in_and_validation():
     from app.terminal.specialist_evals import specialist_replay
     from app.core.config import Settings
 
-    empty_config = Settings(_env_file=None, openai_api_key=None, gemini_api_key=None)
+    empty_config = Settings(_env_file=None, options_agent_provider='auto', openai_api_key=None, gemini_api_key=None)
     with pytest.raises(ValueError, match='(required|configured|credentials)'):
         asyncio.run(specialist_replay('live-model', config=empty_config))
 
@@ -145,11 +145,11 @@ def test_live_model_mode_invokes_registered_agent_with_mock_transport(monkeypatc
         model_calls.append(self.name)
         # return appropriate output based on output_schema
         schema = getattr(self, 'output_schema', None)
-        if schema is AgentAnswer:
+        if isinstance(schema,type) and issubclass(schema,AgentAnswer):
             return type('MockOutput', (), {'content': AgentAnswer(answer='Live chain analysis', snapshot_ids=['11111111-1111-1111-1111-111111111111']), 'metrics': None})()
-        elif schema is PortfolioAnalysisAnswer:
+        elif isinstance(schema, type) and issubclass(schema, PortfolioAnalysisAnswer) and not issubclass(schema, PortfolioRiskAnswer):
             return type('MockOutput', (), {'content': PortfolioAnalysisAnswer(answer='Live portfolio analysis', evidence_ids=['22222222-2222-2222-2222-222222222222']), 'metrics': None})()
-        elif schema is PortfolioRiskAnswer:
+        elif isinstance(schema, type) and issubclass(schema, PortfolioRiskAnswer):
             return type('MockOutput', (), {'content': PortfolioRiskAnswer(answer='Live risk analysis', evidence_ids=['33333333-3333-3333-3333-333333333333'], risk_report_ids=['44444444-4444-4444-4444-444444444444']), 'metrics': None})()
         elif schema is RouteAnswer:
             return type('MockOutput', (), {'content': RouteAnswer(scope='chain'), 'metrics': None})()

@@ -5,6 +5,8 @@ import math
 from .portfolio_contracts import PortfolioIssue, PortfolioRow, PortfolioSection, PortfolioSnapshot, SectionObservation, ValueProvenance, parse_decimal
 FORMULA='portfolio.v1.decimal.1'
 EXCHANGES={'nse_cm','bse_cm','nse_fo','bse_fo','cde_fo','mcx_fo'}
+def cash_expiry_missing(value,holding,exchange):
+    return holding and exchange in ('nse_cm','bse_cm') and str(value).strip().upper() in ('','NA','N/A','-','0','-1')
 def text(v):
     return str(v) if isinstance(v,(str,int)) and not isinstance(v,bool) else None
 def alias(raw,*keys):
@@ -15,11 +17,14 @@ def resolve_portfolio_instrument(raw,catalogue,*,holding):
     # Contradictory provider aliases invalidate identity even before catalogue lookup.
     for keys in [('exchangeSegment','exSeg','exchange'),('exchangeIdentifier','tok','token'),('displaySymbol','trdSym','symbol')]:
         supplied={str(raw[k]) for k in keys if raw.get(k) is not None}
+        if keys[0]=='displaySymbol' and holding and ex=='nse_cm':
+            supplied={value[:-3] if value.endswith('-EQ') else value for value in supplied}
         if len(supplied)>1: result['identity_status']='invalid'
     for keys in [('expiry','expiryDate','expDt'),('strike','strikePrice','stkPrc'),('option_type','optionType','optTp'),('contract_type','kind'),('lot_size','lotSize')]:
         supplied=[]
         for key in keys:
             if raw.get(key) is None: continue
+            if keys[0]=='expiry' and cash_expiry_missing(raw[key],holding,ex): continue
             try: value=parse_decimal(raw[key]) if keys[0] in ('strike','lot_size') else str(raw[key]).upper()
             except ValueError: result['identity_status']='invalid'; continue
             supplied.append(value)
@@ -33,6 +38,7 @@ def resolve_portfolio_instrument(raw,catalogue,*,holding):
         c=candidates[0]; conflict=alias_conflict or bool(sym and c.get('symbol') not in (sym,sym+'-EQ'))
         for keys,target in [(('expiry','expiryDate','expDt'),'expiry'),(('strike','strikePrice','stkPrc'),'strike'),(('option_type','optionType','optTp'),'option_type'),(('contract_type','kind'),'kind'),(('lot_size','lotSize'),'lot_size')]:
             _,v=alias(raw,*keys)
+            if target=='expiry' and cash_expiry_missing(v,holding,ex): continue
             if target == 'lot_size':
                 try: concrete=parse_decimal(c.get(target))
                 except ValueError: concrete=None
@@ -76,6 +82,7 @@ def row(raw,name,index,catalogue):
     if r.currency is None: issue('unknown_currency','currency')
     r.contract_type=text(alias(raw,'contract_type','kind')[1])
     _,expiry=alias(raw,'expiry','expiryDate','expDt')
+    if cash_expiry_missing(expiry,name=='holdings',r.exchange): expiry=None
     if expiry is not None:
         try: r.expiry=date.fromisoformat(str(expiry))
         except ValueError: issue('identity_conflict','expiry'); r.identity_status='invalid'

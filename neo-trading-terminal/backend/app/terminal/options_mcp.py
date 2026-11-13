@@ -43,6 +43,21 @@ class Capability:
     risk_diagnostic: dict | None = None
     harness: object | None = field(default=None, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    analytics_json: dict[str, str] = field(default_factory=dict, repr=False)
+    analytics_budget: object | None = field(default=None, repr=False)
+
+    def bind_analytics(self, evidence, budget):
+        from .analytics_contracts import AnalyticsEvidence
+        from .analytics_runtime import TOOLS_BY_ROLE, TurnBudget
+        roles = {'chain':'options_trading_analysis','portfolio_analysis':'portfolio_analysis','risk':'portfolio_risk'}
+        role = roles.get(self.scope)
+        if self.analytics_budget is not None or not isinstance(budget,TurnBudget) or role is None or not evidence or not set(evidence) <= TOOLS_BY_ROLE[role]:
+            raise ValueError('Invalid analytics capability binding')
+        if not self.session_generation or not isinstance(self.user_id,int) or isinstance(self.user_id,bool) or self.user_id <= 0:
+            raise ValueError('Authenticated live session required')
+        captured = {name:AnalyticsEvidence.model_validate(value.model_dump() if isinstance(value,AnalyticsEvidence) else value).model_dump_json() for name,value in evidence.items()}
+        self.analytics_json, self.analytics_budget = captured, budget
+        self.allowed_tools = frozenset(captured)
 
 
     def __post_init__(self):
@@ -133,6 +148,31 @@ class OptionsMCP:
             if not work.cancelled(): work.exception()
         task.add_done_callback(finished)
         return await asyncio.shield(task)
+
+    async def _read_analytics(self, capability, name):
+        from .analytics_contracts import AnalyticsEvidence
+        async with capability.lock:
+            if name not in capability.allowed_tools or name not in capability.analytics_json or capability.analytics_budget is None:
+                raise ValueError('Tool unavailable for this request')
+            if min(capability.expires,capability.deadline_monotonic) <= time.monotonic() or not capability.session_generation or self.portfolio_service is None:
+                raise ValueError('Live analytics capability expired')
+            role = {'chain':'options_trading_analysis','portfolio_analysis':'portfolio_analysis','risk':'portfolio_risk'}[capability.scope]
+            capability.analytics_budget.consume(role)
+            remaining = min(10,capability.analytics_budget.deadline-time.monotonic(),capability.deadline_monotonic-time.monotonic())
+            async with asyncio.timeout(max(0,remaining)):
+                await self._work(capability,self.portfolio_service.assert_generation,capability.user_id,
+                                 capability.session_generation,deadline_monotonic=capability.deadline_monotonic)
+            return AnalyticsEvidence.model_validate_json(capability.analytics_json[name]).model_dump(mode='json')
+
+    async def _validate_analytics_discovery(self, capability):
+        if capability.analytics_budget is None:
+            return
+        remaining = min(10,capability.expires-time.monotonic(),capability.deadline_monotonic-time.monotonic(),capability.analytics_budget.deadline-time.monotonic())
+        if remaining<=0 or not capability.session_generation or self.portfolio_service is None:
+            raise ValueError('Analytics session unavailable')
+        async with asyncio.timeout(remaining):
+            await self._work(capability,self.portfolio_service.assert_generation,capability.user_id,
+                capability.session_generation,deadline_monotonic=capability.deadline_monotonic)
 
     async def _read(self, capability):
         async with capability.lock:
@@ -232,6 +272,10 @@ class OptionsMCP:
             class ScopeMiddleware(MCPMiddleware):
                 async def on_list_tools(self, context, call_next):
                     capability = get_http_request().scope['options_capability']
+                    try:
+                        await self_runtime._validate_analytics_discovery(capability)
+                    except Exception:
+                        raise ToolError('Analytics session unavailable.') from None
                     return [tool for tool in await call_next(context) if tool.name in capability.allowed_tools]
 
                 async def on_call_tool(self, context, call_next):
@@ -240,6 +284,7 @@ class OptionsMCP:
                         raise ToolError('Tool unavailable for this request.')
                     return await call_next(context)
 
+            self_runtime = self
             mcp = FastMCP('NeoDesk Options', version=TOOL_VERSION,
                           mask_error_details=True, strict_input_validation=True)
             mcp.add_middleware(ScopeMiddleware())
@@ -272,6 +317,18 @@ class OptionsMCP:
             for kind in ('strategy','scan','alert','backtest'):
                 mcp.tool(name=f'get_{kind}_report', description='Read the immutable report selected by the authenticated application; no arguments.',
                     annotations={'readOnlyHint':True,'destructiveHint':False,'openWorldHint':False})(saved_report)
+
+            from .analytics_runtime import TOOLS_BY_ROLE
+            def analytics_reader(name):
+                async def read() -> dict:
+                    try:
+                        return await self._read_analytics(get_http_request().scope['options_capability'],name)
+                    except Exception:
+                        raise ValueError('Analytics evidence unavailable or request budget exhausted.') from None
+                return read
+            for name in sorted(set().union(*TOOLS_BY_ROLE.values())):
+                mcp.tool(name=name,description='Read captured deterministic role-scoped analytics and candidate proposals; unavailable metrics are explicit. No arguments.',
+                    annotations={'readOnlyHint':True,'destructiveHint':False,'openWorldHint':False})(analytics_reader(name))
 
             app = mcp.http_app(path='/mcp', stateless_http=True, json_response=True,
                                middleware=[Middleware(CapabilityAuth, runtime=self)])
@@ -312,7 +369,7 @@ class OptionsMCP:
                 sock.close()
 
     @asynccontextmanager
-    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None, harness=None):
+    async def connection(self, user_id, context, run_id, *, scope='chain', session_generation=None, force_refresh=False, deadline_monotonic=None, risk_policy=None, selected_report=None, harness=None, analytics_evidence=None, analytics_budget=None):
         if not self.ready:
             raise HTTPException(503, 'Options monitoring is unavailable. The internal MCP service is not ready.')
         from agno.tools.mcp import MCPTools
@@ -325,9 +382,11 @@ class OptionsMCP:
         if scope == 'chain' and not isinstance(context, OptionsContext):
             raise ValueError('Chain requires selected context')
         capability = Capability(user_id, context.model_copy(deep=True) if context is not None else None,
-            run_id, time.monotonic() + 65, scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
+            run_id, (deadline_monotonic + 5 if deadline_monotonic is not None else time.monotonic() + 65), scope=scope, session_generation=session_generation, force_refresh=force_refresh, risk_policy=risk_policy,
             deadline_monotonic=deadline_monotonic if deadline_monotonic is not None else time.monotonic()+60)
         capability.harness = harness
+        if analytics_evidence is not None:
+            capability.bind_analytics(analytics_evidence,analytics_budget)
         if scope in ('strategy','scan','alert','backtest'):
             if context is not None or session_generation is not None or not selected_report or selected_report.get('report_kind') != scope:
                 raise ValueError('Captured selected report required')

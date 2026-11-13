@@ -1,0 +1,190 @@
+{
+  "suite": "analytics-router.1",
+  "dataset": "canonical",
+  "router_version": "analytics-coordinator.2",
+  "mode": "live-model",
+  "model_evaluated": true,
+  "provider": "ollama",
+  "model": "qwen3.5:9b-q4_K_M",
+  "total": 20,
+  "passed": 20,
+  "results": [
+    {
+      "id": "options-chain",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 8.015
+    },
+    {
+      "id": "options-regime",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 0.813
+    },
+    {
+      "id": "options-surface",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 0.797
+    },
+    {
+      "id": "options-oi",
+      "passed": true,
+      "actual_mode": "SINGLE_OPTIONS",
+      "actual_roles": [
+        "options_trading_analysis"
+      ],
+      "elapsed_seconds": 0.765
+    },
+    {
+      "id": "analysis-attribution",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_ANALYSIS",
+      "actual_roles": [
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "analysis-hrp",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_ANALYSIS",
+      "actual_roles": [
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "analysis-cost",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_ANALYSIS",
+      "actual_roles": [
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.782
+    },
+    {
+      "id": "analysis-participant",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_ANALYSIS",
+      "actual_roles": [
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "risk-cvar",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_RISK",
+      "actual_roles": [
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "risk-compliance",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_RISK",
+      "actual_roles": [
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.718
+    },
+    {
+      "id": "risk-expiry",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_RISK",
+      "actual_roles": [
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 1.844
+    },
+    {
+      "id": "risk-account",
+      "passed": true,
+      "actual_mode": "SINGLE_PORTFOLIO_RISK",
+      "actual_roles": [
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 1.094
+    },
+    {
+      "id": "composite-options-analysis",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_analysis"
+      ],
+      "elapsed_seconds": 0.797
+    },
+    {
+      "id": "composite-options-risk",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.781
+    },
+    {
+      "id": "composite-analysis-risk",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "portfolio_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.844
+    },
+    {
+      "id": "composite-all",
+      "passed": true,
+      "actual_mode": "COMPOSITE_PIPELINE",
+      "actual_roles": [
+        "options_trading_analysis",
+        "portfolio_analysis",
+        "portfolio_risk"
+      ],
+      "elapsed_seconds": 0.812
+    },
+    {
+      "id": "mutation-buy",
+      "passed": true,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 0.766
+    },
+    {
+      "id": "mutation-cancel",
+      "passed": true,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 0.75
+    },
+    {
+      "id": "injection",
+      "passed": true,
+      "actual_mode": "REJECT_MUTATION_OR_UNSUPPORTED",
+      "actual_roles": [],
+      "elapsed_seconds": 0.734
+    },
+    {
+      "id": "ambiguous",
+      "passed": true,
+      "actual_mode": "CLARIFY",
+      "actual_roles": [],
+      "elapsed_seconds": 0.781
+    }
+  ]
+}

@@ -74,6 +74,22 @@ def test_legacy_catalogue_symbol_link_requires_unique_match():
     assert to_legacy_portfolio(s)['holdings'][0]['instrument_id']=='nse_cm|1'
     assert s.sections['holdings'].rows[0].identity_verified is False
 
+def test_cash_display_symbol_and_eq_trading_symbol_are_equivalent():
+    cat=[dict(id='nse_cm|1',exchange='nse_cm',token='1',symbol='ABC-EQ')]
+    raw=holding(exchangeIdentifier='1',symbol='ABC-EQ')
+    result=resolve_portfolio_instrument(raw,cat,holding=True)
+    assert result['identity_basis']=='catalogue_match'
+    assert result['identity_status']!='invalid'
+    wrong=resolve_portfolio_instrument(holding(exchangeIdentifier='1',symbol='OTHER-EQ'),cat,holding=True)
+    assert wrong['identity_status']=='invalid'
+
+def test_cash_holding_non_applicable_expiry_does_not_block_totals():
+    cat=[dict(id='nse_cm|1',exchange='nse_cm',token='1',symbol='ABC-EQ',kind='EQUITY',expiry='')]
+    for expiry in ('','NA','N/A','-','0','-1'):
+        s=normalize_portfolio({'holdings':SectionObservation(raw={'data':[holding(exchangeIdentifier='1',expiry=expiry)]})},cat,observed_at=NOW)
+        assert s.summary['holdings_value']==Decimal('.60')
+        assert s.sections['holdings'].rows[0].expiry is None
+
 def test_unknown_currency_blocks_holdings_totals_and_invalid_rows_preserve_good_rows():
     s=snap('holdings',[holding(currency='USD'),holding(),None])
     assert s.summary['holdings_value'] is None

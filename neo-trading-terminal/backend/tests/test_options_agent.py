@@ -33,6 +33,7 @@ def app(tmp_path, monkeypatch):
     _clear_rate_limits()
     result = create_app(Settings(_env_file=None, data_dir=tmp_path, environment='test',
                                 app_password=None, kotak_consumer_key=None,
+                                options_agent_provider='openai',
                                 openai_api_key=SecretStr('test-key'), options_mcp_port=0))
     monkeypatch.setattr(result.state.market, 'call', Mock(return_value=chain()))
     def agent(config, snapshot, tools, *, scope=None):
