@@ -236,10 +236,18 @@ class AnalyticsCaptureService:
                 ban_reason = 'official_dated_ban_publication_unavailable'
             check(generation)
         result = {}
+        declared_risk = None
+        if historical_input is not None and historical_input.risk_positions and set(names)&TOOLS_BY_ROLE['portfolio_risk']:
+            from .analytics_account_sources import declared_account_risk
+            declared_risk = declared_account_risk(user_id,generation,historical_input.observed_at,
+                [position.model_dump(mode='json') for position in historical_input.risk_positions],refs[0])
+            check(generation)
         for name in names:
             check(generation)
             item_refs = (*refs,*account_refs) if name in TOOLS_BY_ROLE['portfolio_risk'] else tuple(refs)
             item = calculate_evidence(name,inputs,source_refs=item_refs,observed_at=observed_at)
+            if declared_risk is not None and name in TOOLS_BY_ROLE['portfolio_risk']:
+                item = item.model_copy(update={'metrics':{**item.metrics,'declared_account_scenario':declared_risk},'status':'PARTIAL'})
             if name == 'check_sebi_and_mwpl_compliance':
                 if ban_publication is not None:
                     from .analytics_rule_sources import map_published_bans
