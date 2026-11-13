@@ -210,11 +210,15 @@ class HistoricalAnalyticsInput(Contract):
     participant_price_return_5sessions: float | None = Field(default=None,ge=-1,le=1000,allow_inf_nan=False)
     proposal_cost_scenarios: tuple[DeclaredProposalCostScenario,...] = Field(default=(),max_length=20)
     ledger_csv: str | None = Field(default=None,max_length=1048576)
+    ledger_mapping: dict | None = None
 
     @model_validator(mode='after')
     def aligned(self):
         if self.ledger_csv is not None:
-            from .optional_ledger import summarize_ledger
+            from .optional_ledger import summarize_ledger,normalize_ledger_csv
+            if self.ledger_mapping is not None:
+                object.__setattr__(self,'ledger_csv',normalize_ledger_csv(self.ledger_csv,self.ledger_mapping))
+                object.__setattr__(self,'ledger_mapping',None)
             summarize_ledger(self.ledger_csv)
         if self.cash_future_basis is not None:
             basis=self.cash_future_basis

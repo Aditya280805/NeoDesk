@@ -1,5 +1,9 @@
 # Part A resume
 
+Mapping verification complete:212 affected backend tests passed in33.30s; frontend92 tests/lint passed; production static build passed after moving a locked generated .next cache aside. No live broker/runtime confirmation claimed. No credentials read or provider changes staged. Remaining source coverage and full whole-account acceptance remain as previously documented.
+
+CSV mapping slice: optional ledger_mapping supports explicit date/type/amount column names, INR/paise units, three date formats and user-supplied label mappings. Backend normalizes before storing, discards unmapped columns and clears mapping metadata; unknown labels/ambiguous headers/fractional paise rejected. UI mapping controls set before file selection. Arbitrary CSV layouts meeting this schema supported; separate debit/credit columns, preambles, Excel/PDF remain unsupported. Tests/build underway; record exact outputs before final claim.
+
 Saved import management implemented: owner-filtered list/delete store functions; authenticated GET/DELETE /api/options-agent/imports endpoints; UI list and deletion confirmation, with session-expiry draft fencing and explicit retained-derived-report notice. Context7 FastAPI APIRouter include/delete docs checked.209 affected tests passed; four focused storage/API tests passed including cross-owner404 and unauthenticated401. Frontend92 tests/lint passed; build completion recorded separately. This closes logical original-import deletion, not arbitrary file mapping or production-source gaps. Preserve provider hunks in routers/options_agent.py when staging: own only analytics_imports router inclusion.
 
 Optional ledger verification finalized: frontend production static build completed successfully; three ledger tests rerun after malformed-CSV handling passed. No runtime restart/live broker confirmation or remote CI/Docker run occurred in this slice. Existing provider edits remain unstaged.

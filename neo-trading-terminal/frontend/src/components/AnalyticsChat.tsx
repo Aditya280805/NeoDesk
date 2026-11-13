@@ -34,6 +34,8 @@ export default function AnalyticsChat({ context }: { context: Context }) {
   const requestQuestion = useRef('')
   const [historicalInput, setHistoricalInput] = useState('')
   const [savedImports, setSavedImports] = useState<{ dataset_id: string }[]>([])
+  const [ledgerMapping, setLedgerMapping] = useState({ date_column: 'date', type_column: 'type', amount_column: 'amount_paise', unit: 'PAISE', date_format: '%Y-%m-%d' })
+  const [ledgerTypeValues, setLedgerTypeValues] = useState('{}')
   const requestInput = useRef<unknown>(null)
   const revision = useRef(0)
   const mounted = useRef(true)
@@ -49,6 +51,7 @@ export default function AnalyticsChat({ context }: { context: Context }) {
       setQuestion('')
       setHistoricalInput('')
       setSavedImports([])
+      setLedgerTypeValues('{}')
       setResult(null)
       setBusy(false)
       setError('')
@@ -138,16 +141,23 @@ export default function AnalyticsChat({ context }: { context: Context }) {
             try {
               const text = await file.text()
               if (!mounted.current || selectedRevision !== revision.current) return
-              if (text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] !== 'date,type,amount_paise') throw new Error('Use the CSV columns date,type,amount_paise.')
               const existing = historicalInput.trim() ? JSON.parse(historicalInput) : {
                 context, observed_at: new Date().toISOString(), provenance: 'user ledger upload', licence: 'uploaded by account owner',
               }
-              setHistoricalInput(JSON.stringify({ ...existing, ledger_csv: text }, null, 2))
+              setHistoricalInput(JSON.stringify({ ...existing, ledger_csv: text, ledger_mapping: { ...ledgerMapping, type_values: JSON.parse(ledgerTypeValues) } }, null, 2))
               setResult(null)
               setError('')
             } catch (error) { setError(failure(error)) }
           }} />
         </label>
+        <fieldset disabled={busy}><legend>CSV column mapping (set before selecting the file)</legend>
+          {(['date_column', 'type_column', 'amount_column'] as const).map(key => <label key={key}>{key.replaceAll('_', ' ')}
+            <input value={ledgerMapping[key]} onChange={event => setLedgerMapping(value => ({ ...value, [key]: event.target.value }))} />
+          </label>)}
+          <label>Amount unit<select value={ledgerMapping.unit} onChange={event => setLedgerMapping(value => ({ ...value, unit: event.target.value }))}><option value="PAISE">Paise</option><option value="INR">Rupees</option></select></label>
+          <label>Date format<select value={ledgerMapping.date_format} onChange={event => setLedgerMapping(value => ({ ...value, date_format: event.target.value }))}><option value="%Y-%m-%d">YYYY-MM-DD</option><option value="%d/%m/%Y">DD/MM/YYYY</option><option value="%d-%m-%Y">DD-MM-YYYY</option></select></label>
+          <label>Transaction labels (JSON, for example {`{"Money In":"DEPOSIT"}`})<input value={ledgerTypeValues} onChange={event => setLedgerTypeValues(event.target.value)} /></label>
+        </fieldset>
         <p>Standard CSV format: date,type,amount_paise. Dates use YYYY-MM-DD; amounts are nonnegative integer paise. Types: DEPOSIT, WITHDRAWAL, CHARGE, SETTLEMENT_CREDIT, SETTLEMENT_DEBIT. Remove personal identifiers. The upload is submitted with your next question and stored privately with your account. Clear the text below to remove it before submission.</p>
         <label>Declared historical input JSON
           <textarea value={historicalInput} maxLength={2000000} disabled={busy} onChange={event => setHistoricalInput(event.target.value)} />

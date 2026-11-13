@@ -1,5 +1,23 @@
 from app.terminal.optional_ledger import summarize_ledger
+from app.terminal.optional_ledger import normalize_ledger_csv
 import pytest
+
+def test_explicit_column_type_date_and_rupee_mapping():
+    text='When,Category,Value,Private\n13/11/2026,Money In,125.50,SECRET\n'
+    canonical=normalize_ledger_csv(text,dict(date_column='When',type_column='Category',amount_column='Value',unit='INR',date_format='%d/%m/%Y',type_values={'Money In':'DEPOSIT'}))
+    assert 'SECRET' not in canonical and 'Private' not in canonical
+    assert summarize_ledger(canonical)['net_external_flow_paise']==12550
+    from datetime import UTC,datetime
+    from app.terminal.analytics_inputs import HistoricalAnalyticsInput
+    from app.terminal.options_snapshot import OptionsContext
+    value=HistoricalAnalyticsInput(context=OptionsContext(),provenance='upload',licence='owner',observed_at=datetime.now(UTC),ledger_csv=text,
+        ledger_mapping=dict(date_column='When',type_column='Category',amount_column='Value',unit='INR',date_format='%d/%m/%Y',type_values={'Money In':'DEPOSIT'}))
+    assert 'SECRET' not in value.model_dump_json() and value.ledger_mapping is None
+
+def test_mapping_never_guesses_type_or_rounds_fractional_paise():
+    mapping=dict(date_column='D',type_column='T',amount_column='A',unit='INR')
+    with pytest.raises(ValueError): normalize_ledger_csv('D,T,A\n2026-01-01,UNKNOWN,1',mapping)
+    with pytest.raises(ValueError): normalize_ledger_csv('D,T,A\n2026-01-01,DEPOSIT,1.001',mapping)
 
 def test_optional_ledger_summarizes_cash_movements_without_return_claims():
     result=summarize_ledger('date,type,amount_paise\n2026-01-01,DEPOSIT,10000\n2026-01-02,WITHDRAWAL,2000\n')
