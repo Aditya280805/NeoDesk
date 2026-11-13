@@ -2,11 +2,42 @@
 import csv
 import io
 import re
-from datetime import date
+import hashlib
+import time
+from datetime import UTC, date, datetime
+from contextlib import nullcontext
+
+import httpx
 
 SOURCE_URL = 'https://nsearchives.nseindia.com/content/fo/fo_secban.csv'
 MONTHS = {name:index for index,name in enumerate(
     ('JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'),1)}
+
+
+def fetch_ban_publication(expected_trade_date: date, *, deadline: float, client=None) -> dict:
+    """Read only the fixed official URL; never follow a redirect or retry."""
+    def remaining():
+        value = deadline-time.monotonic()
+        if value <= 0:
+            raise TimeoutError('Ban publication acquisition deadline exhausted')
+        return min(value,5)
+    timeout = remaining()
+    with (httpx.Client(follow_redirects=False) if client is None else nullcontext(client)) as source:
+        with source.stream('GET',SOURCE_URL,timeout=timeout,follow_redirects=False) as response:
+            response.raise_for_status()
+            chunks, size = [],0
+            for chunk in response.iter_bytes():
+                remaining()
+                size += len(chunk)
+                if size > 65536:
+                    raise ValueError('Ban publication exceeds size limit')
+                chunks.append(chunk)
+    remaining()
+    body = b''.join(chunks).decode('utf-8-sig')
+    result = parse_ban_publication(body,expected_trade_date)
+    result.update(checksum=hashlib.sha256(body.encode('utf-8')).hexdigest(),
+        retrieved_at=datetime.now(UTC).isoformat(),provenance='official_https_fetch')
+    return result
 
 
 def parse_ban_publication(body: str, expected_trade_date: date) -> dict:

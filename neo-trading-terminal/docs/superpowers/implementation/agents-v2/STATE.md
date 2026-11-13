@@ -25,6 +25,8 @@ The user's next after the explicit read-only smoke request authorized scoped liv
 
 ## Next work
 
+Added fixed-URL official ban acquisition with no redirects/retries,64KiB streaming bound, shared-deadline checks and checksum/retrieval provenance. Source fetch and expired-deadline tests first failed, then implemented. Acquisition/cache mounting into risk capture remains incomplete; this helper alone does not change production tool coverage. Full812-test result above predates this fetch helper; report focused verification separately.
+
 Latest verification after the ban parser: full backend812 passed in275.72s, focused parser/history11 passed. This checkpoint is a partial source-adapter improvement, not milestone acceptance. No backend restart, live execution, push or deployment performed.
 
 Ban source follow-up: official CSV successfully fetched via bounded PowerShell HTTPS on2026-11-13. Observed header `Securities in Ban For Trade Date 13-NOV-2026:` and one numbered symbol row. A subsequent Python urllib10s probe timed out: acquisition reliability is still unverified. Added analytics_ban_source.parse_ban_publication with explicit requested-date binding, bounded size, strict ordinal/symbol validation and conservative rejection of unknown empty-list formats. Six parser cases plus five history tests passed. This parser is not yet mounted into capture/risk; acquisition/cache/effective-date integration remains open. Full suite launched; record result on completion. This does not close P8 or the other phase gaps.
