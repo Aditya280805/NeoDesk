@@ -145,7 +145,7 @@ def test_live_model_mode_invokes_registered_agent_with_mock_transport(monkeypatc
         model_calls.append(self.name)
         # return appropriate output based on output_schema
         schema = getattr(self, 'output_schema', None)
-        if schema is AgentAnswer:
+        if isinstance(schema,type) and issubclass(schema,AgentAnswer):
             return type('MockOutput', (), {'content': AgentAnswer(answer='Live chain analysis', snapshot_ids=['11111111-1111-1111-1111-111111111111']), 'metrics': None})()
         elif schema is PortfolioAnalysisAnswer:
             return type('MockOutput', (), {'content': PortfolioAnalysisAnswer(answer='Live portfolio analysis', evidence_ids=['22222222-2222-2222-2222-222222222222']), 'metrics': None})()
