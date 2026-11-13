@@ -15,6 +15,8 @@ def resolve_portfolio_instrument(raw,catalogue,*,holding):
     # Contradictory provider aliases invalidate identity even before catalogue lookup.
     for keys in [('exchangeSegment','exSeg','exchange'),('exchangeIdentifier','tok','token'),('displaySymbol','trdSym','symbol')]:
         supplied={str(raw[k]) for k in keys if raw.get(k) is not None}
+        if keys[0]=='displaySymbol' and holding and ex=='nse_cm':
+            supplied={value[:-3] if value.endswith('-EQ') else value for value in supplied}
         if len(supplied)>1: result['identity_status']='invalid'
     for keys in [('expiry','expiryDate','expDt'),('strike','strikePrice','stkPrc'),('option_type','optionType','optTp'),('contract_type','kind'),('lot_size','lotSize')]:
         supplied=[]
