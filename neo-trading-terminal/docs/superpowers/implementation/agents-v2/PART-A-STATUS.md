@@ -1,5 +1,7 @@
 # Part A resume
 
+Latest A2: authenticated diagnostics show holdings data array6, positions/orders envelopes with no data and no generic error keys; funds may legitimately use flat fields. Reference SDK tests/e2e/smoke_test.py documents exact integer stCode5203 + stat Not_Ok as no orders/trades/positions. Added conservative normalization to empty data only for positions/order_report, excluding contradictory data/error fields. Diagnostics now record documented_empty boolean without provider text. Actual live code5203 remains unconfirmed until new code runs; do not claim live portfolio failures fixed. No further restart performed. Verification source/service/normalization42 passed; next capture live documented_empty flag after controlled restart, then resolve holdings via private master crosschecks.
+
 Backend restarted at user's explicit request with backend/logging-local.json enabling the allowlisted market diagnostics; health endpoint verified. Broker sign-in must be renewed. Inspect logs/restart-local.stderr.log only for portfolio_source_shape entries after refresh; never print unrelated raw SDK messages. Initial launch referenced the config before it existed and exited; config was added and successful launch then verified.
 
 Plan: ../../plans/2026-11-13-remaining-part-a-sources.md

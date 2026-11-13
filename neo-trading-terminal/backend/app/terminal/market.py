@@ -281,6 +281,10 @@ class Market:
                 if method in ('holdings','positions','order_report','limits'):
                     from .portfolio_source_diagnostics import source_shape
                     logging.getLogger(__name__).info('portfolio_source_shape method=%s shape=%s',method,source_shape(result))
+                from .portfolio_source_diagnostics import normalized_empty
+                empty = normalized_empty(method,result)
+                if empty is not None:
+                    return empty
                 if isinstance(result, dict) and ('rate limit' in str(result.get('error', '')).lower() or str(result.get('stCode',result.get('status_code','')))=='429'):
                     headers=result.get('headers') if isinstance(result.get('headers'),dict) else {}
                     raise MarketQuotaError(headers.get('Retry-After',headers.get('retry-after',60)))
