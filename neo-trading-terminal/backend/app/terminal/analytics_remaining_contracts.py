@@ -1,6 +1,7 @@
 """Private normalized interface between source capture and pure risk evaluation."""
 from datetime import date
 from typing import Literal
+from zoneinfo import ZoneInfo
 from pydantic import BaseModel,ConfigDict,AwareDatetime,Field,model_validator,field_validator
 from .analytics_inputs import DeclaredRiskPosition,DeclaredComplianceRule
 
@@ -54,4 +55,14 @@ class CapturedRiskBundle(BaseModel):
             raise ValueError('Complete coverage requires sources and no missing inputs')
         if any(source.observed_at>self.as_of for source in self.sources):
             raise ValueError('Source observation follows capture')
+        day = self.as_of.astimezone(ZoneInfo('Asia/Kolkata')).date()
+        for source in self.sources:
+            if source.effective_from and day<source.effective_from or source.effective_until and day>source.effective_until:
+                raise ValueError('Source is not effective at capture date')
+        kinds = {value['contract_id']:value['kind'] for value in self.positions}
+        for rule in self.rules:
+            if not date.fromisoformat(rule['valid_from'])<=day<=date.fromisoformat(rule['valid_until']):
+                raise ValueError('Rule is not effective at capture date')
+            if (rule['instrument_scope']=='cash') != (kinds[rule['contract_id']]=='equity'):
+                raise ValueError('Rule scope contradicts instrument kind')
         return self
