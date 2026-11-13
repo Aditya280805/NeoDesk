@@ -6,7 +6,9 @@ Use Show saved imports to list your latest100 historical-input datasets, then De
 
 Supported initial format: UTF-8 CSV, at most1MiB/10,000 transactions, exactly these columns in order:
 
-For another CSV layout, set column mapping before selecting the file: source date/type/amount column names, amount unit (INR or PAISE), supported date format, and explicit transaction-label mapping JSON. Extra columns are discarded before persistence. Duplicate headers, ambiguous/missing mapped columns, unknown transaction labels and fractional-paise amounts are rejected. Supported dates: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY. Separate debit/credit columns, statement preambles, Excel and PDF require conversion and are not automatically interpreted.
+For another CSV layout, set column mapping before selecting the file: source date/type/amount column names, amount unit (INR or PAISE), supported date format, and explicit transaction-label mapping JSON. Extra columns are discarded before persistence. Duplicate headers, ambiguous/missing mapped columns, unknown transaction labels and fractional-paise amounts are rejected. Supported dates: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY.
+
+Separate debit/credit CSV layouts are now supported through optional debit_column and credit_column mappings (supply both). These replace amount_column. Exactly one side must contain a positive amount; the other must be blank or zero. Credit rows must explicitly map to DEPOSIT or SETTLEMENT_CREDIT; debit rows to WITHDRAWAL, CHARGE or SETTLEMENT_DEBIT. Direction never determines the transaction category automatically. Statement preambles and Excel/PDF still require conversion.
 
 ```csv
 date,type,amount_paise

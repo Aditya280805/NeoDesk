@@ -19,6 +19,15 @@ def test_mapping_never_guesses_type_or_rounds_fractional_paise():
     with pytest.raises(ValueError): normalize_ledger_csv('D,T,A\n2026-01-01,UNKNOWN,1',mapping)
     with pytest.raises(ValueError): normalize_ledger_csv('D,T,A\n2026-01-01,DEPOSIT,1.001',mapping)
 
+def test_separate_debit_credit_columns_require_explicit_direction():
+    mapping=dict(date_column='Date',type_column='Type',debit_column='Debit',credit_column='Credit',unit='INR')
+    text='Date,Type,Debit,Credit\n2026-01-01,DEPOSIT,,100\n2026-01-02,CHARGE,2,\n'
+    result=summarize_ledger(normalize_ledger_csv(text,mapping))
+    assert result['net_external_flow_paise']==10000
+    assert result['totals_paise']['CHARGE']==200
+    with pytest.raises(ValueError): normalize_ledger_csv('Date,Type,Debit,Credit\n2026-01-01,DEPOSIT,2,100',mapping)
+    with pytest.raises(ValueError): normalize_ledger_csv('Date,Type,Debit,Credit\n2026-01-01,DEPOSIT,2,',mapping)
+
 def test_optional_ledger_summarizes_cash_movements_without_return_claims():
     result=summarize_ledger('date,type,amount_paise\n2026-01-01,DEPOSIT,10000\n2026-01-02,WITHDRAWAL,2000\n')
     assert result['net_external_flow_paise']==8000
