@@ -242,9 +242,12 @@ class AnalyticsCaptureService:
             item = calculate_evidence(name,inputs,source_refs=item_refs,observed_at=observed_at)
             if name == 'check_sebi_and_mwpl_compliance':
                 if ban_publication is not None:
+                    from .analytics_rule_sources import map_published_bans
+                    mapped_bans = map_published_bans(inputs.get('risk_positions',()),ban_publication,self.catalogue.instrument)
                     item = item.model_copy(update={'metrics':{**item.metrics,'official_ban_publication':ban_publication},
                         'status':'PARTIAL','source_refs':(*item.source_refs,ban_publication['source']+'#sha256='+ban_publication['checksum']),
-                        'limitations':(*item.limitations,'Published symbol list only; contract mapping, complete account exposure and intraday monitoring remain unverified.')})
+                        'limitations':(*item.limitations,'Ban mapping covers only supplied positions with matching raw master identity; complete account exposure and intraday monitoring remain unverified.')})
+                    item = item.model_copy(update={'metrics':{**item.metrics,'published_ban_contract_mapping':mapped_bans}})
                 elif ban_reason is not None:
                     item = item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'official_ban_publication':ban_reason}})
             if name=='get_participant_fii_dii_flow' and participant_reason is not None:
