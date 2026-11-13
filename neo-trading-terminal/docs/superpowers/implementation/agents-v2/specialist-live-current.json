@@ -1,0 +1,11 @@
+{
+  "model_evaluated": true,
+  "broker_evaluated": false,
+  "source": "isolated_synthetic_fixture",
+  "status": "completed",
+  "claims": 4,
+  "mcp_reads": 1,
+  "elapsed_seconds": 22.563,
+  "capabilities_released": true,
+  "passed": true
+}
