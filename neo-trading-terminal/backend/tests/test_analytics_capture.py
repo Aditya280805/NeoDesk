@@ -21,6 +21,20 @@ def sources(tmp_path):
     return market,portfolio,snapshots,store
 
 
+def test_daily_fills_capture_is_owner_bound_analysis_only(tmp_path):
+    from app.terminal.analytics_capture import AnalyticsCaptureService
+    market,portfolio,snapshots,store = sources(tmp_path)
+    market.call=Mock(return_value={'data':[]})
+    async def scenario():
+        captured=await AnalyticsCaptureService(market,store,snapshots,portfolio,catalogue=Mock()).capture(
+            7,OptionsContext(),['get_portfolio_attribution_and_rebalance'],budget=TurnBudget())
+        item=captured.for_role('portfolio_analysis')['get_portfolio_attribution_and_rebalance']
+        assert item.metrics['authenticated_daily_fill_summary']['fill_count']==0
+        assert market.call.call_args.kwargs['user_id']==7
+        assert not captured.for_role('portfolio_risk')
+    asyncio.run(scenario())
+
+
 def test_compliance_capture_includes_official_publication_without_account_verdict(tmp_path,monkeypatch):
     from app.terminal.analytics_capture import AnalyticsCaptureService
     from app.terminal import analytics_ban_source

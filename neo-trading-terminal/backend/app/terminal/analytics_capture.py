@@ -236,6 +236,18 @@ class AnalyticsCaptureService:
                 ban_reason = 'official_dated_ban_publication_unavailable'
             check(generation)
         result = {}
+        fill_summary,fill_reason = None,None
+        if self.catalogue is not None and 'get_portfolio_attribution_and_rebalance' in names:
+            from zoneinfo import ZoneInfo
+            from .analytics_fill_sources import parse_daily_fills
+            check(generation)
+            try:
+                fill_summary = parse_daily_fills(self.market.call('trade_report',user_id=user_id,deadline_monotonic=deadline),
+                    datetime.now(UTC).astimezone(ZoneInfo('Asia/Kolkata')).date())
+            except (BrokerError,ValueError,KeyError,TypeError):
+                check(generation)
+                fill_reason = 'authenticated_daily_fills_unavailable_or_invalid'
+            check(generation)
         declared_risk = None
         if historical_input is not None and historical_input.risk_positions and set(names)&TOOLS_BY_ROLE['portfolio_risk']:
             from .analytics_account_sources import declared_account_risk
@@ -246,6 +258,12 @@ class AnalyticsCaptureService:
             check(generation)
             item_refs = (*refs,*account_refs) if name in TOOLS_BY_ROLE['portfolio_risk'] else tuple(refs)
             item = calculate_evidence(name,inputs,source_refs=item_refs,observed_at=observed_at)
+            if name=='get_portfolio_attribution_and_rebalance':
+                if fill_summary is not None:
+                    item = item.model_copy(update={'metrics':{**item.metrics,'authenticated_daily_fill_summary':fill_summary},
+                        'status':'PARTIAL','source_refs':(*item.source_refs,'kotak-trade-report:'+fill_summary['trade_date'])})
+                elif fill_reason is not None:
+                    item = item.model_copy(update={'unavailable_reasons':{**item.unavailable_reasons,'daily_fills':fill_reason}})
             if declared_risk is not None and name in TOOLS_BY_ROLE['portfolio_risk']:
                 item = item.model_copy(update={'metrics':{**item.metrics,'declared_account_scenario':declared_risk},'status':'PARTIAL'})
             if name == 'check_sebi_and_mwpl_compliance':

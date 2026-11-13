@@ -278,7 +278,7 @@ class Market:
                 raise MarketDeadlineError('Portfolio request deadline expired.')
             try:
                 result = getattr(broker_to_call._sdk(), method)(**kwargs)
-                if method in ('holdings','positions','order_report','limits'):
+                if method in ('holdings','positions','order_report','limits','trade_report'):
                     from .portfolio_source_diagnostics import source_shape
                     logging.getLogger(__name__).info('portfolio_source_shape method=%s shape=%s',method,source_shape(result))
                 from .portfolio_source_diagnostics import normalized_empty

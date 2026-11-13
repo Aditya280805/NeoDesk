@@ -8,7 +8,7 @@ def documented_empty(raw):
             raw.get('data') in (None,[]))
 
 def normalized_empty(method,raw):
-    return {'data':[]} if method in ('positions','order_report') and documented_empty(raw) else None
+    return {'data':[]} if method in ('positions','order_report','trade_report') and documented_empty(raw) else None
 
 def kind(value):
     if value is None: return 'none'
